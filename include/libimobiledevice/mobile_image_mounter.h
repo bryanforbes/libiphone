@@ -29,18 +29,21 @@ extern "C" {
 
 #include <libimobiledevice/libimobiledevice.h>
 
-/* Error Codes */
+/** @name Error Codes */
+/*@{*/
 #define MOBILE_IMAGE_MOUNTER_E_SUCCESS                0
 #define MOBILE_IMAGE_MOUNTER_E_INVALID_ARG           -1
 #define MOBILE_IMAGE_MOUNTER_E_PLIST_ERROR           -2
 #define MOBILE_IMAGE_MOUNTER_E_CONN_FAILED           -3
 
 #define MOBILE_IMAGE_MOUNTER_E_UNKNOWN_ERROR       -256
+/*@}*/
 
+/** Represents an error code. */
 typedef int16_t mobile_image_mounter_error_t;
 
-struct mobile_image_mounter_client_int;
-typedef struct mobile_image_mounter_client_int *mobile_image_mounter_client_t;
+typedef struct mobile_image_mounter_client_private mobile_image_mounter_client_private;
+typedef mobile_image_mounter_client_private *mobile_image_mounter_client_t; /**< The client handle. */
 
 /* Interface */
 mobile_image_mounter_error_t mobile_image_mounter_new(idevice_t device, uint16_t port, mobile_image_mounter_client_t *client);

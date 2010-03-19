@@ -86,7 +86,7 @@ screenshotr_error_t screenshotr_client_new(idevice_t device, uint16_t port,
 		return ret;
 	}
 
-	screenshotr_client_t client_loc = (screenshotr_client_t) malloc(sizeof(struct screenshotr_client_int));
+	screenshotr_client_t client_loc = (screenshotr_client_t) malloc(sizeof(struct screenshotr_client_private));
 	client_loc->parent = dlclient;
 
 	/* perform handshake */
@@ -145,7 +145,7 @@ screenshotr_error_t screenshotr_take_screenshot(screenshotr_client_t client, cha
 	plist_t dict = plist_new_dict();
 	plist_dict_insert_item(dict, "MessageType", plist_new_string("ScreenShotRequest"));
 
-	res = screenshotr_error(device_link_service_process_message(client->parent, dict));
+	res = screenshotr_error(device_link_service_send_process_message(client->parent, dict));
 	plist_free(dict);
 	if (res != SCREENSHOTR_E_SUCCESS) {
 		debug_info("could not send plist, error %d", res);
@@ -153,7 +153,7 @@ screenshotr_error_t screenshotr_take_screenshot(screenshotr_client_t client, cha
 	}
 
 	dict = NULL;
-	res = screenshotr_error(device_link_service_get_process_message(client->parent, &dict));
+	res = screenshotr_error(device_link_service_receive_process_message(client->parent, &dict));
 	if (res != SCREENSHOTR_E_SUCCESS) {
 		debug_info("could not get screenshot data, error %d", res);
 		goto leave;

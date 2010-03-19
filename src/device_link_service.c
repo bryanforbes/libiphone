@@ -90,7 +90,7 @@ device_link_service_error_t device_link_service_client_new(idevice_t device, uin
 	}
 
 	/* create client object */
-	device_link_service_client_t client_loc = (device_link_service_client_t) malloc(sizeof(struct device_link_service_client_int));
+	device_link_service_client_t client_loc = (device_link_service_client_t) malloc(sizeof(struct device_link_service_client_private));
 	client_loc->parent = plistclient;
 
 	/* all done, return success */
@@ -254,6 +254,34 @@ device_link_service_error_t device_link_service_disconnect(device_link_service_c
 }
 
 /**
+ * Sends a DLMessagePing plist.
+ *
+ * @param client The device link service client to use.
+ * @param message String to send as ping message.
+ *
+ * @return DEVICE_LINK_SERVICE_E_SUCCESS on success,
+ *     DEVICE_LINK_SERVICE_E_INVALID_ARG if client or message is invalid,
+ *     or DEVICE_LINK_SERVICE_E_MUX_ERROR if the DLMessagePing plist could
+ *     not be sent.
+ */
+device_link_service_error_t device_link_service_send_ping(device_link_service_client_t client, const char *message)
+{
+	if (!client || !client->parent || !message)
+		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
+
+	plist_t array = plist_new_array();
+	plist_array_append_item(array, plist_new_string("DLMessagePing"));
+	plist_array_append_item(array, plist_new_string(message));
+
+	device_link_service_error_t err = DEVICE_LINK_SERVICE_E_SUCCESS;
+	if (property_list_service_send_binary_plist(client->parent, array) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
+		err = DEVICE_LINK_SERVICE_E_MUX_ERROR;
+	}
+	plist_free(array);
+	return err;
+}
+
+/**
  * Sends a DLMessageProcessMessage plist.
  *
  * @param client The device link service client to use.
@@ -264,7 +292,7 @@ device_link_service_error_t device_link_service_disconnect(device_link_service_c
  *     message is not a PLIST_DICT, or DEVICE_LINK_SERVICE_E_MUX_ERROR if
  *     the DLMessageProcessMessage plist could not be sent.
  */
-device_link_service_error_t device_link_service_process_message(device_link_service_client_t client, plist_t message)
+device_link_service_error_t device_link_service_send_process_message(device_link_service_client_t client, plist_t message)
 {
 	if (!client || !client->parent || !message)
 		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
@@ -297,7 +325,7 @@ device_link_service_error_t device_link_service_process_message(device_link_serv
  *    invalid or is not a DLMessageProcessMessage,
  *    or DEVICE_LINK_SERVICE_E_MUX_ERROR if receiving from device fails.
  */
-device_link_service_error_t device_link_service_get_process_message(device_link_service_client_t client, plist_t *message)
+device_link_service_error_t device_link_service_receive_process_message(device_link_service_client_t client, plist_t *message)
 {
 	if (!client || !client->parent || !message)
 		return DEVICE_LINK_SERVICE_E_INVALID_ARG;

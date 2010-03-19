@@ -29,7 +29,8 @@ extern "C" {
 
 #include <libimobiledevice/libimobiledevice.h>
 
-/* Error Codes */
+/** @name Error Codes */
+/*@{*/
 #define SCREENSHOTR_E_SUCCESS                0
 #define SCREENSHOTR_E_INVALID_ARG           -1
 #define SCREENSHOTR_E_PLIST_ERROR           -2
@@ -37,11 +38,13 @@ extern "C" {
 #define SCREENSHOTR_E_BAD_VERSION           -4
 
 #define SCREENSHOTR_E_UNKNOWN_ERROR       -256
+/*@}*/
 
+/** Represents an error code. */
 typedef int16_t screenshotr_error_t;
 
-struct screenshotr_client_int;
-typedef struct screenshotr_client_int *screenshotr_client_t;
+typedef struct screenshotr_client_private screenshotr_client_private;
+typedef screenshotr_client_private *screenshotr_client_t; /**< The client handle. */
 
 screenshotr_error_t screenshotr_client_new(idevice_t device, uint16_t port, screenshotr_client_t * client);
 screenshotr_error_t screenshotr_client_free(screenshotr_client_t client);

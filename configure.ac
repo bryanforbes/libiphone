@@ -22,7 +22,7 @@ dnl libtool versioning
 #                 changes to the signature and the semantic)
 #  ? :+1 : ?   == just internal changes
 # CURRENT : REVISION : AGE
-LIBIMOBILEDEVICE_SO_VERSION=0:0:0
+LIBIMOBILEDEVICE_SO_VERSION=1:0:0
 
 AC_SUBST(LIBIMOBILEDEVICE_SO_VERSION)
 
@@ -162,11 +162,11 @@ AC_OUTPUT([
 Makefile
 src/Makefile
 include/Makefile
-fdi/Makefile
 dev/Makefile
 tools/Makefile
 swig/Makefile
 cython/Makefile
+docs/Makefile
 libimobiledevice-1.0.pc
 doxygen.cfg
 ])

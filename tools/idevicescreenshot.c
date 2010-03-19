@@ -1,7 +1,31 @@
+/**
+ * idevicescreenshot -- Gets a screenshot from a connected iPhone/iPod Touch
+ *
+ * Copyright (C) 2010 Nikias Bassen <nikias@gmx.li>
+ *
+ * Licensed under the GNU General Public License Version 2
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more profile.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 
+ * USA
+ */
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <time.h>
 
 #include <libimobiledevice/libimobiledevice.h>
 #include <libimobiledevice/lockdown.h>
@@ -68,19 +92,22 @@ int main(int argc, char **argv)
 			printf("Could not connect to screenshotr!\n");
 		} else {
 			char *imgdata = NULL;
+			char filename[36];
 			uint64_t imgsize = 0;
+			time_t now = time(NULL);
+			strftime(filename, 36, "screenshot-%Y-%m-%d-%H-%M-%S.tiff", gmtime(&now));
 			if (screenshotr_take_screenshot(shotr, &imgdata, &imgsize) == SCREENSHOTR_E_SUCCESS) {
-				FILE *f = fopen("screenshot.tiff", "w");
+				FILE *f = fopen(filename, "w");
 				if (f) {
 					if (fwrite(imgdata, 1, (size_t)imgsize, f) == (size_t)imgsize) {
-						printf("Screenshot saved to screenshot.tiff\n");
+						printf("Screenshot saved to %s\n", filename);
 						result = 0;
 					} else {
-						printf("Could not save screenshot to file!\n");
+						printf("Could not save screenshot to file %s!\n", filename);
 					}
 					fclose(f);
 				} else {
-					printf("Could not open screenshot.tiff for writing: %s\n", strerror(errno));
+					printf("Could not open %s for writing: %s\n", filename, strerror(errno));
 				}
 			} else {
 				printf("Could not get screenshot!\n");
@@ -102,8 +129,9 @@ void print_usage(int argc, char **argv)
         name = strrchr(argv[0], '/');
         printf("Usage: %s [OPTIONS]\n", (name ? name + 1: argv[0]));
         printf("Gets a screenshot from the connected iPhone/iPod Touch.\n");
-	printf("NOTE: A mounted developer disk image is required on the device, otherwise\n");
-	printf(" the screenshotr service is not available.\n\n");
+        printf("The screenshot is saved as a TIFF image in the current directory.\n");
+        printf("NOTE: A mounted developer disk image is required on the device, otherwise\n");
+        printf("the screenshotr service is not available.\n\n");
         printf("  -d, --debug\t\tenable communication debugging\n");
         printf("  -u, --uuid UUID\ttarget specific device by its 40-digit device UUID\n");
         printf("  -h, --help\t\tprints usage information\n");
