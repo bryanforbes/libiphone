@@ -1,3 +1,8 @@
+from base cimport Base, Error as BaseError, DeviceLinkService
+from idevice cimport iDevice, idevice_t
+
+include "std.pxi"
+
 cdef extern from "libimobiledevice/screenshotr.h":
     cdef struct screenshotr_client_private:
         pass
@@ -15,7 +20,7 @@ cdef extern from "libimobiledevice/screenshotr.h":
     screenshotr_error_t screenshotr_client_free(screenshotr_client_t client)
     screenshotr_error_t screenshotr_take_screenshot(screenshotr_client_t client, char **imgdata, uint64_t *imgsize)
 
-cdef class ScreenshotrError(BaseError):
+cdef class Error(BaseError):
     def __init__(self, *args, **kwargs):
         self._lookup_table = {
             SCREENSHOTR_E_SUCCESS: "Success",
@@ -27,7 +32,7 @@ cdef class ScreenshotrError(BaseError):
         }
         BaseError.__init__(self, *args, **kwargs)
 
-cdef class ScreenshotrClient(Base):
+cdef class Client(DeviceLinkService):
     __service_name__ = "com.apple.mobile.screenshotr"
     cdef screenshotr_client_t _c_client
 
@@ -57,4 +62,4 @@ cdef class ScreenshotrClient(Base):
         return result
 
     cdef inline BaseError _error(self, int16_t ret):
-        return ScreenshotrError(ret)
+        return Error(ret)

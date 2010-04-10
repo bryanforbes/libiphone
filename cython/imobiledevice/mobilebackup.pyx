@@ -1,3 +1,8 @@
+from base cimport Base, Error as BaseError, DeviceLinkService
+from idevice cimport iDevice, idevice_t
+
+include "std.pxi"
+
 cdef extern from "libimobiledevice/mobilebackup.h":
     cdef struct mobilebackup_client_private:
         pass
@@ -16,7 +21,7 @@ cdef extern from "libimobiledevice/mobilebackup.h":
     mobilebackup_error_t mobilebackup_receive(mobilebackup_client_t client, plist.plist_t *plist)
     mobilebackup_error_t mobilebackup_send(mobilebackup_client_t client, plist.plist_t plist)
 
-cdef class MobileBackupError(BaseError):
+cdef class Error(BaseError):
     def __init__(self, *args, **kwargs):
         self._lookup_table = {
             MOBILEBACKUP_E_SUCCESS: "Success",
@@ -28,7 +33,7 @@ cdef class MobileBackupError(BaseError):
         }
         BaseError.__init__(self, *args, **kwargs)
 
-cdef class MobileBackupClient(PropertyListService):
+cdef class Client(DeviceLinkService):
     __service_name__ = "com.apple.mobilebackup"
     cdef mobilebackup_client_t _c_client
 
@@ -52,4 +57,4 @@ cdef class MobileBackupClient(PropertyListService):
         return mobilebackup_receive(self._c_client, node)
 
     cdef inline BaseError _error(self, int16_t ret):
-        return MobileBackupError(ret)
+        return Error(ret)

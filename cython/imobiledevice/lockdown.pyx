@@ -1,4 +1,19 @@
+from base cimport Error as BaseError, PropertyListService
+from idevice cimport iDevice, idevice_t
+
+include "std.pxi"
+
 cdef extern from "libimobiledevice/lockdown.h":
+    cdef struct lockdownd_client_private:
+        pass
+    ctypedef lockdownd_client_private *lockdownd_client_t
+    cdef struct lockdownd_pair_record:
+        char *device_certificate
+        char *host_certificate
+        char *host_id
+        char *root_certificate
+    ctypedef lockdownd_pair_record *lockdownd_pair_record_t
+
     ctypedef enum lockdownd_error_t:
         LOCKDOWN_E_SUCCESS = 0
         LOCKDOWN_E_INVALID_ARG = -1
@@ -42,7 +57,7 @@ cdef extern from "libimobiledevice/lockdown.h":
     lockdownd_error_t lockdownd_enter_recovery(lockdownd_client_t client)
     lockdownd_error_t lockdownd_goodbye(lockdownd_client_t client)
 
-cdef class LockdownError(BaseError):
+cdef class Error(BaseError):
     def __init__(self, *args, **kwargs):
         self._lookup_table = {
             LOCKDOWN_E_SUCCESS: "Success",
@@ -68,7 +83,8 @@ cdef class LockdownError(BaseError):
         }
         BaseError.__init__(self, *args, **kwargs)
 
-cdef class LockdownPairRecord:
+cdef class PairRecord:
+    cdef lockdownd_pair_record_t _c_record
     #def __cinit__(self, bytes device_certificate, bytes host_certificate, bytes host_id, bytes root_certificate, *args, **kwargs):
     property device_certificate:
         def __get__(self):
@@ -87,7 +103,10 @@ cdef class LockdownPairRecord:
             cdef bytes result = self._c_record.root_certificate
             return result
 
-cdef class LockdownClient(PropertyListService):
+cdef class Client(PropertyListService):
+    cdef lockdownd_client_t _c_client
+    cdef readonly iDevice device
+
     def __cinit__(self, iDevice device not None, bytes label="", bool handshake=True, *args, **kwargs):
         cdef:
             iDevice dev = device
@@ -171,7 +190,7 @@ cdef class LockdownClient(PropertyListService):
         elif isinstance(service, basestring):
             c_service_name = <bytes>service
         else:
-            raise TypeError("LockdownClient.start_service() takes a BaseService or string as its first argument")
+            raise TypeError("Client.start_service() takes a BaseService or string as its first argument")
 
         try:
             self.handle_error(lockdownd_start_service(self._c_client, c_service_name, &port))
@@ -188,7 +207,7 @@ cdef class LockdownClient(PropertyListService):
         if not hasattr(service_class, '__service_name__') and \
             not service_class.__service_name__ is not None \
             and not isinstance(service_class.__service_name__, basestring):
-            raise TypeError("LockdownClient.get_service_client() takes a BaseService as its first argument")
+            raise TypeError("Client.get_service_client() takes a BaseService as its first argument")
 
         port = self.start_service(service_class)
         return service_class(self.device, port)
@@ -217,19 +236,19 @@ cdef class LockdownClient(PropertyListService):
     cpdef pair(self, object pair_record=None):
         cdef lockdownd_pair_record_t c_pair_record = NULL
         if pair_record is not None:
-            c_pair_record = (<LockdownPairRecord>pair_record)._c_record
+            c_pair_record = (<PairRecord>pair_record)._c_record
         self.handle_error(lockdownd_pair(self._c_client, c_pair_record))
 
     cpdef validate_pair(self, object pair_record=None):
         cdef lockdownd_pair_record_t c_pair_record = NULL
         if pair_record is not None:
-            c_pair_record = (<LockdownPairRecord>pair_record)._c_record
+            c_pair_record = (<PairRecord>pair_record)._c_record
         self.handle_error(lockdownd_validate_pair(self._c_client, c_pair_record))
 
     cpdef unpair(self, object pair_record=None):
         cdef lockdownd_pair_record_t c_pair_record = NULL
         if pair_record is not None:
-            c_pair_record = (<LockdownPairRecord>pair_record)._c_record
+            c_pair_record = (<PairRecord>pair_record)._c_record
         self.handle_error(lockdownd_unpair(self._c_client, c_pair_record))
 
     cpdef activate(self, plist.Node activation_record):
@@ -251,4 +270,4 @@ cdef class LockdownClient(PropertyListService):
         return lockdownd_receive(self._c_client, node)
 
     cdef inline BaseError _error(self, int16_t ret):
-        return LockdownError(ret)
+        return Error(ret)

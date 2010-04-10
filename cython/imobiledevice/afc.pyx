@@ -1,3 +1,8 @@
+from base cimport Base, Error as BaseError, Service
+from idevice cimport iDevice, idevice_t
+
+include "std.pxi"
+
 cdef extern from "libimobiledevice/afc.h":
     cdef struct afc_client_private:
         pass
@@ -71,7 +76,7 @@ LOCK_SH = AFC_LOCK_SH
 LOCK_EX = AFC_LOCK_EX
 LOCK_UN = AFC_LOCK_UN
 
-cdef class AfcError(BaseError):
+cdef class Error(BaseError):
     def __init__(self, *args, **kwargs):
         self._lookup_table = {
             AFC_E_SUCCESS: "Success",
@@ -105,16 +110,16 @@ cdef class AfcError(BaseError):
         }
         BaseError.__init__(self, *args, **kwargs)
 
-# forward declaration of AfcClient
-cdef class AfcClient(BaseService)
+# forward declaration of Client
+cdef class Client(Service)
 
-cdef class AfcFile(Base):
+cdef class File(Base):
     cdef uint64_t _c_handle
-    cdef AfcClient _client
+    cdef Client _client
     cdef bytes _filename
 
     def __init__(self, *args, **kwargs):
-        raise TypeError("AfcFile cannot be instantiated")
+        raise TypeError("File cannot be instantiated")
 
     cpdef close(self):
         self.handle_error(afc_file_close(self._client._c_client, self._c_handle))
@@ -147,9 +152,9 @@ cdef class AfcFile(Base):
         return bytes_written
 
     cdef inline BaseError _error(self, int16_t ret):
-        return AfcError(ret)
+        return Error(ret)
 
-cdef class AfcClient(BaseService):
+cdef class Client(Service):
     __service_name__ = "com.apple.afc"
     cdef afc_client_t _c_client
 
@@ -167,7 +172,7 @@ cdef class AfcClient(BaseService):
             self.handle_error(err)
 
     cdef inline BaseError _error(self, int16_t ret):
-        return AfcError(ret)
+        return Error(ret)
 
     cpdef list get_device_info(self):
         cdef:
@@ -215,11 +220,11 @@ cdef class AfcClient(BaseService):
 
         return result
 
-    cpdef AfcFile open(self, bytes filename, bytes mode='r'):
+    cpdef File open(self, bytes filename, bytes mode='r'):
         cdef:
             afc_file_mode_t c_mode
             uint64_t handle
-            AfcFile f
+            File f
         if mode == <bytes>'r':
             c_mode = AFC_FOPEN_RDONLY
         elif mode == <bytes>'r+':
@@ -236,7 +241,7 @@ cdef class AfcClient(BaseService):
             raise ValueError("mode string must be 'r', 'r+', 'w', 'w+', 'a', or 'a+'")
 
         self.handle_error(afc_file_open(self._c_client, filename, c_mode, &handle))
-        f = AfcFile.__new__(AfcFile)
+        f = File.__new__(File)
         f._c_handle = handle
         f._client = self
         f._filename = filename

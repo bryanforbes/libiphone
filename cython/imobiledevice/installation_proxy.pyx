@@ -1,3 +1,8 @@
+from base cimport Base, Error as BaseError, PropertyListService
+from idevice cimport iDevice, idevice_t
+
+include "std.pxi"
+
 cdef extern from "libimobiledevice/installation_proxy.h":
     cdef struct instproxy_client_private:
         pass
@@ -29,7 +34,7 @@ cdef extern from "libimobiledevice/installation_proxy.h":
 cdef void instproxy_notify_cb(const_char_ptr operation, plist.plist_t status, void *py_callback) with gil:
     (<object>py_callback)(operation, plist.plist_t_to_node(status, False))
 
-cdef class InstallationProxyError(BaseError):
+cdef class Error(BaseError):
     def __init__(self, *args, **kwargs):
         self._lookup_table = {
             INSTPROXY_E_SUCCESS: "Success",
@@ -42,7 +47,7 @@ cdef class InstallationProxyError(BaseError):
         }
         BaseError.__init__(self, *args, **kwargs)
 
-cdef class InstallationProxy(Base):
+cdef class Client(PropertyListService):
     __service_name__ = "com.apple.mobile.installation_proxy"
     cdef instproxy_client_t _c_client
 
@@ -71,7 +76,7 @@ cdef class InstallationProxy(Base):
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise Error(INSTPROXY_E_INVALID_ARG)
         err = instproxy_browse(self._c_client, c_options, &c_result)
         self.handle_error(err)
         return plist.plist_t_to_node(c_result)
@@ -87,7 +92,7 @@ cdef class InstallationProxy(Base):
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise Error(INSTPROXY_E_INVALID_ARG)
         if callback is None:
             err = instproxy_install(self._c_client, pkg_path, options._c_node, NULL, NULL)
         else:
@@ -105,7 +110,7 @@ cdef class InstallationProxy(Base):
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise Error(INSTPROXY_E_INVALID_ARG)
         if callback is None:
             err = instproxy_upgrade(self._c_client, pkg_path, options._c_node, NULL, NULL)
         else:
@@ -123,7 +128,7 @@ cdef class InstallationProxy(Base):
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise Error(INSTPROXY_E_INVALID_ARG)
         if callback is None:
             err = instproxy_uninstall(self._c_client, appid, options._c_node, NULL, NULL)
         else:
@@ -142,7 +147,7 @@ cdef class InstallationProxy(Base):
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise Error(INSTPROXY_E_INVALID_ARG)
         err = instproxy_lookup_archives(self._c_client, options._c_node, &c_node)
         self.handle_error(err)
         return plist.plist_t_to_node(c_node)
@@ -158,7 +163,7 @@ cdef class InstallationProxy(Base):
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise Error(INSTPROXY_E_INVALID_ARG)
         if callback is None:
             err = instproxy_archive(self._c_client, appid, options._c_node, NULL, NULL)
         else:
@@ -176,7 +181,7 @@ cdef class InstallationProxy(Base):
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise Error(INSTPROXY_E_INVALID_ARG)
         if callback is None:
             err = instproxy_restore(self._c_client, appid, options._c_node, NULL, NULL)
         else:
@@ -194,7 +199,7 @@ cdef class InstallationProxy(Base):
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise Error(INSTPROXY_E_INVALID_ARG)
         if callback is None:
             err = instproxy_remove_archive(self._c_client, appid, options._c_node, NULL, NULL)
         else:
@@ -202,4 +207,4 @@ cdef class InstallationProxy(Base):
         self.handle_error(err)
 
     cdef inline BaseError _error(self, int16_t ret):
-        return InstallationProxyError(ret)
+        return Error(ret)

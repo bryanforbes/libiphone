@@ -1,3 +1,8 @@
+from base cimport Base, Error as BaseError, PropertyListService
+from idevice cimport iDevice, idevice_t
+
+include "std.pxi"
+
 cdef extern from "libimobiledevice/notification_proxy.h":
     cdef struct np_client_private:
         pass
@@ -19,7 +24,7 @@ cdef extern from "libimobiledevice/notification_proxy.h":
 cdef void np_notify_cb(const_char_ptr notification, void *py_callback):
     (<object>py_callback)(notification)
 
-cdef class NotificationProxyError(BaseError):
+cdef class Error(BaseError):
     def __init__(self, *args, **kwargs):
         self._lookup_table = {
             NP_E_SUCCESS: "Success",
@@ -30,7 +35,7 @@ cdef class NotificationProxyError(BaseError):
         }
         BaseError.__init__(self, *args, **kwargs)
 
-cdef class NotificationProxy(Base):
+cdef class Client(PropertyListService):
     __service_name__ = "com.apple.mobile.notification_proxy"
     cdef np_client_t _c_client
 
@@ -48,7 +53,7 @@ cdef class NotificationProxy(Base):
             self.handle_error(err)
 
     cdef inline BaseError _error(self, int16_t ret):
-        return NotificationProxyError(ret)
+        return Error(ret)
 
     cpdef set_notify_callback(self, object callback):
         self.handle_error(np_set_notify_callback(self._c_client, np_notify_cb, <void*>callback))

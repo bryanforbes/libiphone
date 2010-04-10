@@ -1,3 +1,8 @@
+from base cimport Base, Error as BaseError, DeviceLinkService
+from idevice cimport iDevice, idevice_t
+
+include "std.pxi"
+
 cdef extern from "libimobiledevice/mobilesync.h":
     cdef struct mobilesync_client_private:
         pass
@@ -16,7 +21,7 @@ cdef extern from "libimobiledevice/mobilesync.h":
     mobilesync_error_t mobilesync_receive(mobilesync_client_t client, plist.plist_t *plist)
     mobilesync_error_t mobilesync_send(mobilesync_client_t client, plist.plist_t plist)
 
-cdef class MobileSyncError(BaseError):
+cdef class Error(BaseError):
     def __init__(self, *args, **kwargs):
         self._lookup_table = {
             MOBILESYNC_E_SUCCESS: "Success",
@@ -28,7 +33,7 @@ cdef class MobileSyncError(BaseError):
         }
         BaseError.__init__(self, *args, **kwargs)
 
-cdef class MobileSyncClient(DeviceLinkService):
+cdef class Client(DeviceLinkService):
     __service_name__ = "com.apple.mobilesync"
     cdef mobilesync_client_t _c_client
 
@@ -52,4 +57,4 @@ cdef class MobileSyncClient(DeviceLinkService):
         return mobilesync_receive(self._c_client, node)
 
     cdef inline BaseError _error(self, int16_t ret):
-        return MobileSyncError(ret)
+        return Error(ret)

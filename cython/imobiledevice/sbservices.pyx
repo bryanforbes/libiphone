@@ -1,3 +1,8 @@
+from base cimport Base, Error as BaseError, PropertyListService
+from idevice cimport iDevice, idevice_t
+
+include "std.pxi"
+
 cdef extern from "libimobiledevice/sbservices.h":
     cdef struct sbservices_client_private:
         pass
@@ -14,7 +19,7 @@ cdef extern from "libimobiledevice/sbservices.h":
     sbservices_error_t sbservices_set_icon_state(sbservices_client_t client, plist.plist_t newstate)
     sbservices_error_t sbservices_get_icon_pngdata(sbservices_client_t client, char *bundleId, char **pngdata, uint64_t *pngsize)
 
-cdef class SpringboardServicesError(BaseError):
+cdef class Error(BaseError):
     def __init__(self, *args, **kwargs):
         self._lookup_table = {
             SBSERVICES_E_SUCCESS: "Success",
@@ -25,7 +30,7 @@ cdef class SpringboardServicesError(BaseError):
         }
         BaseError.__init__(self, *args, **kwargs)
 
-cdef class SpringboardServicesClient(Base):
+cdef class Client(PropertyListService):
     __service_name__ = "com.apple.springboardservices"
     cdef sbservices_client_t _c_client
 
@@ -36,11 +41,11 @@ cdef class SpringboardServicesClient(Base):
     
     def __dealloc__(self):
         if self._c_client is not NULL:
-            err = SpringboardServicesError(sbservices_client_free(self._c_client))
+            err = Error(sbservices_client_free(self._c_client))
             if err: raise err
 
     cdef inline BaseError _error(self, int16_t ret):
-        return SpringboardServicesError(ret)
+        return Error(ret)
 
     property icon_state:
         def __get__(self):

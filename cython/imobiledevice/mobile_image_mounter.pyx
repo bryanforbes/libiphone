@@ -1,3 +1,8 @@
+from base cimport Base, Error as BaseError, PropertyListService
+from idevice cimport iDevice, idevice_t
+
+include "std.pxi"
+
 cdef extern from "libimobiledevice/mobile_image_mounter.h":
     cdef struct mobile_image_mounter_client_private:
         pass
@@ -16,7 +21,7 @@ cdef extern from "libimobiledevice/mobile_image_mounter.h":
     mobile_image_mounter_error_t mobile_image_mounter_mount_image(mobile_image_mounter_client_t client, char *image_path, char *image_signature, uint16_t signature_length, char *image_type, plist.plist_t *result)
     mobile_image_mounter_error_t mobile_image_mounter_hangup(mobile_image_mounter_client_t client)
 
-cdef class MobileImageMounterError(BaseError):
+cdef class Error(BaseError):
     def __init__(self, *args, **kwargs):
         self._lookup_table = {
             MOBILE_IMAGE_MOUNTER_E_SUCCESS: "Success",
@@ -27,7 +32,7 @@ cdef class MobileImageMounterError(BaseError):
         }
         BaseError.__init__(self, *args, **kwargs)
 
-cdef class MobileImageMounterClient(PropertyListService):
+cdef class Client(PropertyListService):
     __service_name__ = "com.apple.mobile.mobile_image_mounter"
     cdef mobile_image_mounter_client_t _c_client
 
@@ -45,7 +50,7 @@ cdef class MobileImageMounterClient(PropertyListService):
             self.handle_error(err)
 
     cdef inline BaseError _error(self, int16_t ret):
-        return MobileImageMounterError(ret)
+        return Error(ret)
 
     cpdef plist.Node lookup_image(self, bytes image_type):
         cdef:

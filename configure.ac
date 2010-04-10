@@ -166,6 +166,7 @@ dev/Makefile
 tools/Makefile
 swig/Makefile
 cython/Makefile
+cython/imobiledevice/Makefile
 docs/Makefile
 libimobiledevice-1.0.pc
 doxygen.cfg

@@ -1,3 +1,8 @@
+from base cimport Base, Error as BaseError, PropertyListService
+from idevice cimport iDevice, idevice_t, iDeviceConnection, idevice_connection_t
+
+include "std.pxi"
+
 cdef extern from "libimobiledevice/file_relay.h":
     cdef struct file_relay_client_private:
         pass
@@ -18,7 +23,7 @@ cdef extern from "libimobiledevice/file_relay.h":
 
     file_relay_error_t file_relay_request_sources(file_relay_client_t client, const_sources_t sources, idevice_connection_t *connection)
 
-cdef class FileRelayError(BaseError):
+cdef class Error(BaseError):
     def __init__(self, *args, **kwargs):
         self._lookup_table = {
             FILE_RELAY_E_SUCCESS: "Success",
@@ -33,7 +38,7 @@ cdef class FileRelayError(BaseError):
 
 cimport stdlib
 
-cdef class FileRelayClient(PropertyListService):
+cdef class Client(PropertyListService):
     __service_name__ = "com.apple.mobile.file_relay"
     cdef file_relay_client_t _c_client
 
@@ -67,4 +72,4 @@ cdef class FileRelayClient(PropertyListService):
         return conn
 
     cdef inline BaseError _error(self, int16_t ret):
-        return FileRelayError(ret)
+        return Error(ret)
