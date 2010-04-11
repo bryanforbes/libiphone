@@ -1,4 +1,10 @@
-__all__ = ['set_debug_level', 'event_subscribe', 'event_unsubscribe', 'get_device_list', 'iDevice', 'iDeviceConnection']
+__all__ = [
+    'set_debug_level',
+    'event_subscribe',
+    'event_unsubscribe',
+    'get_list',
+    'iDevice'
+]
 
 cdef extern from "libimobiledevice/libimobiledevice.h":
     ctypedef enum idevice_error_t:
@@ -41,12 +47,12 @@ cdef class Error(BaseError):
 def set_debug_level(int level):
     idevice_set_debug_level(level)
 
-cdef class iDeviceEvent:
+cdef class Event:
     def __init__(self, *args, **kwargs):
-        raise TypeError("iDeviceEvent cannot be instantiated")
+        raise TypeError("Event cannot be instantiated")
 
     def __str__(self):
-        return 'iDeviceEvent: %s (%s)' % (self.event == IDEVICE_DEVICE_ADD and 'Add' or 'Remove', self.uuid)
+        return 'Event: %s (%s)' % (self.event == IDEVICE_DEVICE_ADD and 'Add' or 'Remove', self.uuid)
 
     property event:
         def __get__(self):
@@ -59,11 +65,14 @@ cdef class iDeviceEvent:
             return self._c_event.conn_type
 
 cdef void idevice_event_cb(const_idevice_event_t c_event, void *user_data) with gil:
-    cdef iDeviceEvent event = iDeviceEvent.__new__(iDeviceEvent)
+    cdef Event event = Event.__new__(Event)
     event._c_event = c_event
     (<object>user_data)(event)
 
 def event_subscribe(object callback):
+    """
+    Subscribe to device events. `callback` must take one `Event` argument.
+    """
     cdef Error err = Error(idevice_event_subscribe(idevice_event_cb, <void*>callback))
     if err: raise err
 
@@ -71,7 +80,7 @@ def event_unsubscribe():
     cdef Error err = Error(idevice_event_unsubscribe())
     if err: raise err
 
-def get_device_list():
+def get_list():
     cdef:
         char** devices
         int count
@@ -90,9 +99,9 @@ def get_device_list():
     if err: raise err
     return result
 
-cdef class iDeviceConnection(Base):
+cdef class Connection(Base):
     def __init__(self, *args, **kwargs):
-        raise TypeError("iDeviceConnection cannot be instantiated.  Please use iDevice.connect()")
+        raise TypeError("Connection cannot be instantiated.  Please use iDevice.connect()")
 
     cpdef disconnect(self):
         cdef idevice_error_t err
@@ -119,10 +128,10 @@ cdef class iDevice(Base):
     cdef inline BaseError _error(self, int16_t ret):
         return Error(ret)
 
-    cpdef iDeviceConnection connect(self, uint16_t port):
+    cpdef Connection connect(self, uint16_t port):
         cdef:
             idevice_error_t err
-            iDeviceConnection conn = iDeviceConnection.__new__(iDeviceConnection)
+            Connection conn = Connection.__new__(Connection)
         err = idevice_connect(self._c_dev, port, &conn._c_connection)
         self.handle_error(err)
         return conn

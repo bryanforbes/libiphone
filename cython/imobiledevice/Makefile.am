@@ -138,7 +138,7 @@ screenshotr_la_LIBADD = ../../src/libimobiledevice.la
 screenshotr.c: screenshotr.pyx idevice.pxd base.pxd $(PXDINCLUDES)
 
 .pyx.c:
-	$(CYTHON) -I$(CYTHON_PLIST_INCLUDE_DIR) -I$(top_srcdir)/src -o $@ $<
+	$(CYTHON) -X embedsignature=True -I$(CYTHON_PLIST_INCLUDE_DIR) -I$(top_srcdir)/src -o $@ $<
 
 # imobiledevice_private.c: $(IMOBILEDEVICE_PRIVATE_SOURCES) $(IMOBILEDEVICE_INCLUDES) $(PLIST_INCLUDES)
 #	$(CYTHON) $(IMOBILEDEVICE_CPPFLAGS) -I$(top_srcdir)/src -o $@ $<

@@ -20,10 +20,10 @@ cdef extern from "libimobiledevice/libimobiledevice.h":
         int conn_type
     ctypedef idevice_event_t* const_idevice_event_t "const idevice_event_t*"
 
-cdef class iDeviceEvent:
+cdef class Event:
     cdef const_idevice_event_t _c_event
 
-cdef class iDeviceConnection(Base):
+cdef class Connection(Base):
     cdef idevice_connection_t _c_connection
 
     cpdef disconnect(self)
@@ -31,4 +31,4 @@ cdef class iDeviceConnection(Base):
 cdef class iDevice(Base):
     cdef idevice_t _c_dev
 
-    cpdef iDeviceConnection connect(self, uint16_t port)
+    cpdef Connection connect(self, uint16_t port)

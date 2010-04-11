@@ -1,5 +1,5 @@
 from base cimport Base, Error as BaseError, PropertyListService
-from idevice cimport iDevice, idevice_t, iDeviceConnection, idevice_connection_t
+from idevice cimport iDevice, idevice_t, Connection, idevice_connection_t
 
 include "std.pxi"
 
@@ -55,12 +55,12 @@ cdef class Client(PropertyListService):
             err = file_relay_client_free(self._c_client)
             self.handle_error(err)
 
-    cpdef iDeviceConnection request_sources(self, list sources):
+    cpdef Connection request_sources(self, list sources):
         cdef:
             file_relay_error_t err
             Py_ssize_t count = len(sources)
             char** c_sources = <char**>stdlib.malloc(sizeof(char*) * (count + 1))
-            iDeviceConnection conn = iDeviceConnection.__new__(iDeviceConnection)
+            Connection conn = Connection.__new__(Connection)
 
         for i, value in enumerate(sources):
             c_sources[i] = value
