@@ -10,7 +10,7 @@
 autom4te.cache/*
 *.in
 */.deps/*
-*/*.deps/*
+*/*/.deps/*
 m4/*
 swig/*
 *.swp
@@ -50,5 +50,5 @@ tools/idevicesyslog
 tools/idevicebackup
 tools/ideviceimagemounter
 tools/idevicescreenshot
-cython/.libs/*
-cython/*.c
+cython/imobiledevice/.libs/*
+cython/imobiledevice/*.c
