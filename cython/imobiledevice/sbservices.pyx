@@ -57,7 +57,7 @@ cdef class Client(PropertyListService):
                 self.handle_error(err)
             except BaseError, e:
                 if c_node != NULL:
-                    plist_free(c_node)
+                    plist.plist_free(c_node)
                 raise
             return plist.plist_t_to_node(c_node)
         def __set__(self, plist.Node newstate not None):
@@ -76,5 +76,5 @@ cdef class Client(PropertyListService):
             raise
         finally:
             result = pngdata[:pngsize]
-            free(pngdata)
+            stdlib.free(pngdata)
         return result

@@ -147,7 +147,7 @@ cdef class File(Base):
         except BaseError, e:
             raise
         finally:
-            free(c_data)
+            stdlib.free(c_data)
 
         return bytes_written
 
@@ -191,9 +191,9 @@ cdef class Client(Service):
                 while infos[i]:
                     info = infos[i]
                     result.append(info)
-                    free(infos[i])
+                    stdlib.free(infos[i])
                     i = i + 1
-                free(infos)
+                stdlib.free(infos)
 
         return result
 
@@ -214,9 +214,9 @@ cdef class Client(Service):
                 while dir_list[i]:
                     f = dir_list[i]
                     result.append(f)
-                    free(dir_list[i])
+                    stdlib.free(dir_list[i])
                     i = i + 1
-                free(dir_list)
+                stdlib.free(dir_list)
 
         return result
 
@@ -248,9 +248,9 @@ cdef class Client(Service):
 
         return f
 
-    cpdef get_file_info(self, bytes path):
+    cpdef list get_file_info(self, bytes path):
         cdef:
-            list result
+            list result = []
             char** c_result
             int i = 0
             bytes info
@@ -263,9 +263,9 @@ cdef class Client(Service):
                 while c_result[i]:
                     info = c_result[i]
                     result.append(info)
-                    free(c_result[i])
+                    stdlib.free(c_result[i])
                     i = i + 1
-                free(c_result)
+                stdlib.free(c_result)
 
         return result
 

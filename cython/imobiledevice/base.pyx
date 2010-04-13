@@ -45,7 +45,7 @@ cdef class PropertyListService(Service):
             self.handle_error(err)
         except Error, e:
             if c_node != NULL:
-                plist_free(c_node)
+                plist.plist_free(c_node)
             raise
 
         return plist.plist_t_to_node(c_node)
