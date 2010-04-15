@@ -80,6 +80,8 @@ def event_unsubscribe():
     cdef Error err = Error(idevice_event_unsubscribe())
     if err: raise err
 
+cimport python_list
+
 def get_list():
     cdef:
         char** devices
@@ -88,16 +90,21 @@ def get_list():
         bytes device
         Error err = Error(idevice_get_device_list(&devices, &count))
 
-    if err: raise err
+    if err:
+        if devices != NULL:
+            idevice_device_list_free(devices)
+        raise err
 
-    result = []
-    for i from 0 <= i < count:
-        device = devices[i]
-        result.append(device)
-
-    err = Error(idevice_device_list_free(devices))
-    if err: raise err
-    return result
+    result = python_list.PyList_New(0)
+    try:
+        for i from 0 <= i < count:
+            device = devices[i]
+            python_list.PyList_Append(result, device)
+        return result
+    except:
+        raise
+    finally:
+        idevice_device_list_free(devices)
 
 cdef class Connection(Base):
     def __init__(self, *args, **kwargs):
@@ -123,7 +130,7 @@ cdef class iDevice(Base):
 
     def __dealloc__(self):
         if self._c_dev is not NULL:
-            self.handle_error(idevice_free(self._c_dev))
+            idevice_free(self._c_dev)
 
     cdef inline BaseError _error(self, int16_t ret):
         return Error(ret)

@@ -125,8 +125,7 @@ cdef class Client(PropertyListService):
     def __dealloc__(self):
         cdef lockdownd_error_t err
         if self._c_client is not NULL:
-            err = lockdownd_client_free(self._c_client)
-            self.handle_error(err)
+            lockdownd_client_free(self._c_client)
 
     cpdef bytes query_type(self):
         cdef:

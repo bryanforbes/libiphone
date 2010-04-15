@@ -110,6 +110,27 @@ cdef class Error(BaseError):
         }
         BaseError.__init__(self, *args, **kwargs)
 
+cimport python_list
+cdef list char_array_to_list(char** arr):
+    cdef:
+        int i = 0
+        bytes item
+        list result = python_list.PyList_New(0)
+
+    while arr[i]:
+        item = arr[i]
+        python_list.PyList_Append(result, item)
+        i = i + 1
+
+    return result
+
+cdef free_char_array(char** arr):
+    cdef int i = 0
+    while arr[i]:
+        stdlib.free(arr[i])
+        i = i + 1
+    stdlib.free(arr)
+
 # forward declaration of Client
 cdef class Client(Service)
 
@@ -180,22 +201,17 @@ cdef class Client(Service):
             char** infos
             bytes info
             int i = 0
-            list result = []
         err = afc_get_device_info(self._c_client, &infos)
         try:
             self.handle_error(err)
+            return char_array_to_list(infos)
         except BaseError, e:
+            if infos != NULL:
+                free_char_array(infos)
             raise
         finally:
             if infos != NULL:
-                while infos[i]:
-                    info = infos[i]
-                    result.append(info)
-                    stdlib.free(infos[i])
-                    i = i + 1
-                stdlib.free(infos)
-
-        return result
+                free_char_array(infos)
 
     cpdef list read_directory(self, bytes directory):
         cdef:
@@ -203,22 +219,15 @@ cdef class Client(Service):
             char** dir_list
             bytes f
             int i = 0
-            list result = []
         err = afc_read_directory(self._c_client, directory, &dir_list)
         try:
             self.handle_error(err)
+            return char_array_to_list(dir_list)
         except BaseError, e:
             raise
         finally:
             if dir_list != NULL:
-                while dir_list[i]:
-                    f = dir_list[i]
-                    result.append(f)
-                    stdlib.free(dir_list[i])
-                    i = i + 1
-                stdlib.free(dir_list)
-
-        return result
+                free_char_array(dir_list)
 
     cpdef File open(self, bytes filename, bytes mode='r'):
         cdef:
@@ -250,24 +259,17 @@ cdef class Client(Service):
 
     cpdef list get_file_info(self, bytes path):
         cdef:
-            list result = []
             char** c_result
             int i = 0
             bytes info
         try:
             self.handle_error(afc_get_file_info(self._c_client, path, &c_result))
+            return char_array_to_list(c_result)
         except BaseError, e:
             raise
         finally:
             if c_result != NULL:
-                while c_result[i]:
-                    info = c_result[i]
-                    result.append(info)
-                    stdlib.free(c_result[i])
-                    i = i + 1
-                stdlib.free(c_result)
-
-        return result
+                free_char_array(c_result)
 
     cpdef remove_path(self, bytes path):
         self.handle_error(afc_remove_path(self._c_client, path))
