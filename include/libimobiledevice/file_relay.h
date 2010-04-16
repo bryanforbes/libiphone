@@ -30,16 +30,18 @@ extern "C" {
 #include <libimobiledevice/libimobiledevice.h>
 
 /** @name Error Codes */
-/*@{*/
-#define FILE_RELAY_E_SUCCESS                0
-#define FILE_RELAY_E_INVALID_ARG           -1
-#define FILE_RELAY_E_PLIST_ERROR           -2
-#define FILE_RELAY_E_MUX_ERROR             -3
-#define FILE_RELAY_E_INVALID_SOURCE        -4
-#define FILE_RELAY_E_STAGING_EMPTY         -5
+typedef enum {
+	FILE_RELAY_E_SUCCESS           =    0,
+	FILE_RELAY_E_INVALID_ARG       =   -1,
+	FILE_RELAY_E_PLIST_ERROR       =   -2,
+	FILE_RELAY_E_MUX_ERROR         =   -3,
+	FILE_RELAY_E_INVALID_SOURCE    =   -4,
+	FILE_RELAY_E_STAGING_EMPTY     =   -5,
+	FILE_RELAY_E_UNKNOWN_ERROR     = -256
+} FileRelayClientErrorEnum;
 
-#define FILE_RELAY_E_UNKNOWN_ERROR       -256
-/*@}*/
+#define FILE_RELAY_CLIENT_ERROR file_relay_client_error_quark()
+GQuark       file_relay_client_error_quark      (void);
 
 /** Represents an error code. */
 typedef int16_t file_relay_error_t;
@@ -47,10 +49,10 @@ typedef int16_t file_relay_error_t;
 typedef struct file_relay_client_private file_relay_client_private;
 typedef file_relay_client_private *file_relay_client_t; /**< The client handle. */
 
-file_relay_error_t file_relay_client_new(idevice_t device, uint16_t port, file_relay_client_t *client);
-file_relay_error_t file_relay_client_free(file_relay_client_t client);
+file_relay_client_t file_relay_client_new(idevice_t device, uint16_t port, GError **error);
+void file_relay_client_free(file_relay_client_t client, GError **error);
 
-file_relay_error_t file_relay_request_sources(file_relay_client_t client, const char **sources, idevice_connection_t *connection);
+idevice_connection_t file_relay_request_sources(file_relay_client_t client, const char **sources, GError **error);
 
 #ifdef __cplusplus
 }

@@ -30,15 +30,17 @@ extern "C" {
 #include <libimobiledevice/libimobiledevice.h>
 
 /** @name Error Codes */
-/*@{*/
-#define SCREENSHOTR_E_SUCCESS                0
-#define SCREENSHOTR_E_INVALID_ARG           -1
-#define SCREENSHOTR_E_PLIST_ERROR           -2
-#define SCREENSHOTR_E_MUX_ERROR             -3
-#define SCREENSHOTR_E_BAD_VERSION           -4
+typedef enum {
+	SCREENSHOTR_E_SUCCESS            =    0,
+	SCREENSHOTR_E_INVALID_ARG        =   -1,
+	SCREENSHOTR_E_PLIST_ERROR        =   -2,
+	SCREENSHOTR_E_MUX_ERROR          =   -3,
+	SCREENSHOTR_E_BAD_VERSION        =   -4,
+	SCREENSHOTR_E_UNKNOWN_ERROR      = -256
+} ScreenshotrClientErrorEnum;
 
-#define SCREENSHOTR_E_UNKNOWN_ERROR       -256
-/*@}*/
+#define SCREENSHOTR_CLIENT_ERROR screenshotr_client_error_quark()
+GQuark       screenshotr_client_error_quark      (void);
 
 /** Represents an error code. */
 typedef int16_t screenshotr_error_t;
@@ -46,9 +48,9 @@ typedef int16_t screenshotr_error_t;
 typedef struct screenshotr_client_private screenshotr_client_private;
 typedef screenshotr_client_private *screenshotr_client_t; /**< The client handle. */
 
-screenshotr_error_t screenshotr_client_new(idevice_t device, uint16_t port, screenshotr_client_t * client);
-screenshotr_error_t screenshotr_client_free(screenshotr_client_t client);
-screenshotr_error_t screenshotr_take_screenshot(screenshotr_client_t client, char **imgdata, uint64_t *imgsize);
+screenshotr_client_t screenshotr_client_new(idevice_t device, uint16_t port, GError **error);
+void screenshotr_client_free(screenshotr_client_t client, GError **error);
+void screenshotr_take_screenshot(screenshotr_client_t client, char **imgdata, uint64_t *imgsize, GError **error);
 
 #ifdef __cplusplus
 }

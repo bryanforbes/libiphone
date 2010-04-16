@@ -24,6 +24,12 @@
 #include "property_list_service.h"
 #include "debug.h"
 
+GQuark
+file_relay_client_error_quark (void)
+{
+  return g_quark_from_static_string ("file-relay-client-error-quark");
+}
+
 /**
  * Connects to the file_relay service on the specified device.
  *
@@ -36,15 +42,15 @@
  *     FILE_RELAY_E_INVALID_ARG when one of the parameters is invalid,
  *     or FILE_RELAY_E_MUX_ERROR when the connection failed.
  */
-file_relay_error_t file_relay_client_new(idevice_t device, uint16_t port, file_relay_client_t *client)
+file_relay_client_t file_relay_client_new(idevice_t device, uint16_t port, GError **error)
 {
-	if (!device || port == 0 || !client || *client) {
-		return FILE_RELAY_E_INVALID_ARG;
-	}
+	g_assert(device != NULL && port > 0);
 
-	property_list_service_client_t plistclient = NULL;
-	if (property_list_service_client_new(device, port, &plistclient) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		return FILE_RELAY_E_MUX_ERROR;
+	GError *tmp_error = NULL;
+	property_list_service_client_t plistclient = property_list_service_client_new(device, port, &tmp_error);
+	if (tmp_error != NULL) {
+		g_propagate_error(error, tmp_error);
+		return NULL;
 	}
 
 	/* create client object */
@@ -52,8 +58,7 @@ file_relay_error_t file_relay_client_new(idevice_t device, uint16_t port, file_r
 	client_loc->parent = plistclient;
 
 	/* all done, return success */
-	*client = client_loc;
-	return FILE_RELAY_E_SUCCESS;
+	return client_loc;
 }
 
 /**
@@ -67,15 +72,11 @@ file_relay_error_t file_relay_client_new(idevice_t device, uint16_t port, file_r
  *     is invalid, or FILE_RELAY_E_UNKNOWN_ERROR when the was an error
  *     freeing the parent property_list_service client.
  */
-file_relay_error_t file_relay_client_free(file_relay_client_t client)
+void file_relay_client_free(file_relay_client_t client, GError **error)
 {
-	if (!client)
-		return FILE_RELAY_E_INVALID_ARG;
+	g_assert(client != NULL);
 
-	if (property_list_service_client_free(client->parent) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		return FILE_RELAY_E_UNKNOWN_ERROR;
-	}
-	return FILE_RELAY_E_SUCCESS;
+	property_list_service_client_free(client->parent, error);
 }
 
 /**
@@ -108,13 +109,12 @@ file_relay_error_t file_relay_client_free(file_relay_client_t client)
  *     sources are invalid, FILE_RELAY_E_STAGING_EMPTY if no data is available
  *     for the given sources, or FILE_RELAY_E_UNKNOWN_ERROR otherwise.
  */
-file_relay_error_t file_relay_request_sources(file_relay_client_t client, const char **sources, idevice_connection_t *connection)
+idevice_connection_t file_relay_request_sources(file_relay_client_t client, const char **sources, GError **error)
 {
-	if (!client || !client->parent || !sources || !sources[0]) {
-		return FILE_RELAY_E_INVALID_ARG;
-	}
-	*connection = NULL;
-	file_relay_error_t err = FILE_RELAY_E_UNKNOWN_ERROR;
+	g_assert(client != NULL && client->parent != NULL && sources != NULL && sources[0] != NULL);
+
+	idevice_connection_t connection = NULL;
+
 	/* set up request plist */
 	plist_t array = plist_new_array();
 	int i = 0;
@@ -125,43 +125,58 @@ file_relay_error_t file_relay_request_sources(file_relay_client_t client, const 
 	plist_t dict = plist_new_dict();
 	plist_dict_insert_item(dict, "Sources", array);
 
-	if (property_list_service_send_xml_plist(client->parent, dict) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
+	GError *tmp_error = NULL;
+	property_list_service_send_xml_plist(client->parent, dict, &tmp_error);
+	if (tmp_error != NULL) {
 		debug_info("ERROR: Could not send request to device!");
-		err = FILE_RELAY_E_MUX_ERROR;
+		g_propagate_error(error, tmp_error);
 		goto leave;
 	}
 	plist_free(dict);
 
 	dict = NULL;
-	if (property_list_service_receive_plist_with_timeout(client->parent, &dict, 60000) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
+	dict = property_list_service_receive_plist_with_timeout(client->parent, 60000, &tmp_error);
+	if (tmp_error != NULL) {
 		debug_info("ERROR: Could not receive answer from device!");
-		err = FILE_RELAY_E_MUX_ERROR;
+		g_propagate_error(error, tmp_error);
 		goto leave;
 	}
 
 	if (!dict) {
 		debug_info("ERROR: Did not receive any plist!");
-		err = FILE_RELAY_E_PLIST_ERROR;
+		g_set_error(error, FILE_RELAY_CLIENT_ERROR,
+			FILE_RELAY_E_PLIST_ERROR,
+			"Did not receive any plist");
 		goto leave;
 	}
 
-	plist_t error = plist_dict_get_item(dict, "Error");
-	if (error) {
+	plist_t error_p = plist_dict_get_item(dict, "Error");
+	if (error_p) {
 		char *errmsg = NULL;
-		plist_get_string_val(error, &errmsg);
+		plist_get_string_val(error_p, &errmsg);
 		if (errmsg) {
 			if (!strcmp(errmsg, "InvalidSource")) {
 				debug_info("ERROR: One or more given sources are invalid!");
-				err = FILE_RELAY_E_INVALID_SOURCE;
+				g_set_error(error, FILE_RELAY_CLIENT_ERROR,
+					FILE_RELAY_E_INVALID_SOURCE,
+					"One or more given sources are invalid");
 			} else if (!strcmp(errmsg, "StagingEmpty")) {
 				debug_info("ERROR: StagingEmpty - No data available!");
-				err = FILE_RELAY_E_STAGING_EMPTY;
+				g_set_error(error, FILE_RELAY_CLIENT_ERROR,
+					FILE_RELAY_E_STAGING_EMPTY,
+					"StagingEmpty - No data available");
 			} else {
 				debug_info("ERROR: Unknown error '%s'", errmsg);
+				g_set_error(error, FILE_RELAY_CLIENT_ERROR,
+					FILE_RELAY_E_UNKNOWN_ERROR,
+					"Unknown error '%s'", errmsg);
 			}
 			free(errmsg);
 		} else {
 			debug_info("ERROR: Could not get error message!");
+				g_set_error(error, FILE_RELAY_CLIENT_ERROR,
+					FILE_RELAY_E_UNKNOWN_ERROR,
+				"Could not get error message");
 		}
 		goto leave;
 	}
@@ -170,7 +185,9 @@ file_relay_error_t file_relay_request_sources(file_relay_client_t client, const 
 	if (!status) {
 		debug_info("ERROR: Unexpected plist received!");
 		debug_plist(dict);
-		err = FILE_RELAY_E_PLIST_ERROR;
+		g_set_error(error, FILE_RELAY_CLIENT_ERROR,
+			FILE_RELAY_E_PLIST_ERROR,
+			"Unexpected plist received");
 		goto leave;
 	}
 
@@ -178,21 +195,26 @@ file_relay_error_t file_relay_request_sources(file_relay_client_t client, const 
 	plist_get_string_val(status, &ack);
 	if (!ack) {
 		debug_info("ERROR: Could not get 'Acknowledged' string!");
+		g_set_error(error, FILE_RELAY_CLIENT_ERROR,
+			FILE_RELAY_E_UNKNOWN_ERROR,
+			"Could not get 'Acknowledged' string!");
 		goto leave;
 	}
 
 	if (strcmp(ack, "Acknowledged")) {
 		debug_info("ERROR: Did not receive 'Acknowledged' but '%s'", ack);
+		g_set_error(error, FILE_RELAY_CLIENT_ERROR,
+			FILE_RELAY_E_UNKNOWN_ERROR,
+			"Did not receive 'Acknowledged' but '%s'", ack);
 		goto leave;
 	}
 	free(ack);
-	err = FILE_RELAY_E_SUCCESS;
 
-	*connection = client->parent->connection;
+	connection = client->parent->connection;
 
 leave:
 	if (dict) {
 		plist_free(dict);
 	}
-	return err;
+	return connection;
 }

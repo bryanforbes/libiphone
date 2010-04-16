@@ -28,6 +28,12 @@
 #include "property_list_service.h"
 #include "debug.h"
 
+GQuark
+mobile_image_mounter_client_error_quark (void)
+{
+  return g_quark_from_static_string ("mobile-image-mounter-client-error-quark");
+}
+
 /**
  * Locks a mobile_image_mounter client, used for thread safety.
  *
@@ -88,18 +94,19 @@ static mobile_image_mounter_error_t mobile_image_mounter_error(property_list_ser
  *    or MOBILE_IMAGE_MOUNTER_E_CONN_FAILED if the connection to the
  *    device could not be established.
  */
-mobile_image_mounter_error_t mobile_image_mounter_new(idevice_t device, uint16_t port, mobile_image_mounter_client_t *client)
+mobile_image_mounter_client_t mobile_image_mounter_new(idevice_t device, uint16_t port, GError **error)
 {
 	/* makes sure thread environment is available */
 	if (!g_thread_supported())
 		g_thread_init(NULL);
 
-	if (!device)
-		return MOBILE_IMAGE_MOUNTER_E_INVALID_ARG;
+	g_assert(device != NULL);
 
-	property_list_service_client_t plistclient = NULL;
-	if (property_list_service_client_new(device, port, &plistclient) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		return MOBILE_IMAGE_MOUNTER_E_CONN_FAILED;
+	GError *tmp_error = NULL;
+	property_list_service_client_t plistclient = property_list_service_client_new(device, port, &tmp_error);
+	if (tmp_error != NULL) {
+		g_propagate_error(error, tmp_error);
+		return NULL;
 	}
 
 	mobile_image_mounter_client_t client_loc = (mobile_image_mounter_client_t) malloc(sizeof(struct mobile_image_mounter_client_private));
@@ -107,8 +114,7 @@ mobile_image_mounter_error_t mobile_image_mounter_new(idevice_t device, uint16_t
 
 	client_loc->mutex = g_mutex_new();
 
-	*client = client_loc;
-	return MOBILE_IMAGE_MOUNTER_E_SUCCESS;
+	return client_loc;
 }
 
 /**
@@ -120,19 +126,16 @@ mobile_image_mounter_error_t mobile_image_mounter_new(idevice_t device, uint16_t
  * @return MOBILE_IMAGE_MOUNTER_E_SUCCESS on success,
  *    or MOBILE_IMAGE_MOUNTER_E_INVALID_ARG if client is NULL.
  */
-mobile_image_mounter_error_t mobile_image_mounter_free(mobile_image_mounter_client_t client)
+void mobile_image_mounter_free(mobile_image_mounter_client_t client, GError **error)
 {
-	if (!client)
-		return MOBILE_IMAGE_MOUNTER_E_INVALID_ARG;
+	g_assert(client != NULL);
 
-	property_list_service_client_free(client->parent);
+	property_list_service_client_free(client->parent, error);
 	client->parent = NULL;
 	if (client->mutex) {
 		g_mutex_free(client->mutex);
 	}
 	free(client);
-
-	return MOBILE_IMAGE_MOUNTER_E_SUCCESS;
 }
 
 /**
@@ -148,33 +151,37 @@ mobile_image_mounter_error_t mobile_image_mounter_free(mobile_image_mounter_clie
  *
  * @return MOBILE_IMAGE_MOUNTER_E_SUCCESS on success, or an error code on error
  */
-mobile_image_mounter_error_t mobile_image_mounter_lookup_image(mobile_image_mounter_client_t client, const char *image_type, plist_t *result)
+plist_t mobile_image_mounter_lookup_image(mobile_image_mounter_client_t client, const char *image_type, GError **error)
 {
-	if (!client || !image_type || !result) {
-		return MOBILE_IMAGE_MOUNTER_E_INVALID_ARG;
-	}
+	g_assert(client != NULL && image_type != NULL);
+
+	GError *tmp_error = NULL;
+	plist_t result = NULL;
+
 	mobile_image_mounter_lock(client);
 
 	plist_t dict = plist_new_dict();
 	plist_dict_insert_item(dict,"Command", plist_new_string("LookupImage"));
 	plist_dict_insert_item(dict,"ImageType", plist_new_string(image_type));
 
-	mobile_image_mounter_error_t res = mobile_image_mounter_error(property_list_service_send_xml_plist(client->parent, dict));
+	property_list_service_send_xml_plist(client->parent, dict, &tmp_error);
 	plist_free(dict);
 
-	if (res != MOBILE_IMAGE_MOUNTER_E_SUCCESS) {
+	if (tmp_error != NULL) {
 		debug_info("%s: Error sending XML plist to device!", __func__);
+		g_propagate_error(error, tmp_error);
 		goto leave_unlock;
 	}
 
-	res = mobile_image_mounter_error(property_list_service_receive_plist(client->parent, result));
-	if (res != MOBILE_IMAGE_MOUNTER_E_SUCCESS) {
+	result = property_list_service_receive_plist(client->parent, &tmp_error);
+	if (tmp_error != NULL) {
 		debug_info("%s: Error receiving response from device!", __func__);
+		g_propagate_error(error, tmp_error);
 	}
 
 leave_unlock:
 	mobile_image_mounter_unlock(client);
-	return res;
+	return result;
 }
 
 /**
@@ -198,11 +205,14 @@ leave_unlock:
  *    MOBILE_IMAGE_MOUNTER_E_INVALID_ARG if on ore more parameters are
  *    invalid, or another error code otherwise.
  */
-mobile_image_mounter_error_t mobile_image_mounter_mount_image(mobile_image_mounter_client_t client, const char *image_path, const char *image_signature, uint16_t signature_length, const char *image_type, plist_t *result)
+plist_t mobile_image_mounter_mount_image(mobile_image_mounter_client_t client, const char *image_path, const char *image_signature, uint16_t signature_length, const char *image_type, GError **error)
 {
-	if (!client || !image_path || !image_signature || (signature_length == 0) || !image_type || !result) {
-		return MOBILE_IMAGE_MOUNTER_E_INVALID_ARG;
-	}
+	g_assert(client != NULL && image_path != NULL && image_signature != NULL && signature_length > 0);
+	g_assert(image_type != NULL);
+
+	GError *tmp_error = NULL;
+	plist_t result = NULL;
+
 	mobile_image_mounter_lock(client);
 
 	plist_t dict = plist_new_dict();
@@ -211,22 +221,24 @@ mobile_image_mounter_error_t mobile_image_mounter_mount_image(mobile_image_mount
 	plist_dict_insert_item(dict, "ImageSignature", plist_new_data(image_signature, signature_length));
 	plist_dict_insert_item(dict, "ImageType", plist_new_string(image_type));
 
-	mobile_image_mounter_error_t res = mobile_image_mounter_error(property_list_service_send_xml_plist(client->parent, dict));
+	property_list_service_send_xml_plist(client->parent, dict, &tmp_error);
 	plist_free(dict);
 
-	if (res != MOBILE_IMAGE_MOUNTER_E_SUCCESS) {
+	if (tmp_error != NULL) {
 		debug_info("%s: Error sending XML plist to device!", __func__);
+		g_propagate_error(error, tmp_error);
 		goto leave_unlock;
 	}
 
-	res = mobile_image_mounter_error(property_list_service_receive_plist(client->parent, result));
-	if (res != MOBILE_IMAGE_MOUNTER_E_SUCCESS) {
+	result = property_list_service_receive_plist(client->parent, &tmp_error);
+	if (tmp_error != NULL) {
 		debug_info("%s: Error receiving response from device!", __func__);
+		g_propagate_error(error, tmp_error);
 	}
 
 leave_unlock:
 	mobile_image_mounter_unlock(client);
-	return res;
+	return result;
 }
 
 /**
@@ -240,28 +252,31 @@ leave_unlock:
  *     MOBILE_IMAGE_MOUNTER_E_INVALID_ARG if client is invalid,
  *     or another error code otherwise.
  */
-mobile_image_mounter_error_t mobile_image_mounter_hangup(mobile_image_mounter_client_t client)
+void mobile_image_mounter_hangup(mobile_image_mounter_client_t client, GError **error)
 {
-	if (!client) {
-		return MOBILE_IMAGE_MOUNTER_E_INVALID_ARG;
-	}
+	g_assert(client != NULL);
+
+	GError *tmp_error = NULL;
+
 	mobile_image_mounter_lock(client);
 
 	plist_t dict = plist_new_dict();
 	plist_dict_insert_item(dict, "Command", plist_new_string("Hangup"));
 
-	mobile_image_mounter_error_t res = mobile_image_mounter_error(property_list_service_send_xml_plist(client->parent, dict));
+	property_list_service_send_xml_plist(client->parent, dict, &tmp_error);
 	plist_free(dict);
 
-	if (res != MOBILE_IMAGE_MOUNTER_E_SUCCESS) {
+	if (tmp_error != NULL) {
 		debug_info("%s: Error sending XML plist to device!", __func__);
+		g_propagate_error(error, tmp_error);
 		goto leave_unlock;
 	}
 
 	dict = NULL;
-	res = mobile_image_mounter_error(property_list_service_receive_plist(client->parent, &dict));
-	if (res != MOBILE_IMAGE_MOUNTER_E_SUCCESS) {
+	dict = property_list_service_receive_plist(client->parent, &tmp_error);
+	if (tmp_error != NULL) {
 		debug_info("%s: Error receiving response from device!", __func__);
+		g_propagate_error(error, tmp_error);
 	}
 	if (dict) {
 		debug_plist(dict);
@@ -270,5 +285,4 @@ mobile_image_mounter_error_t mobile_image_mounter_hangup(mobile_image_mounter_cl
 
 leave_unlock:
 	mobile_image_mounter_unlock(client);
-	return res;
 }

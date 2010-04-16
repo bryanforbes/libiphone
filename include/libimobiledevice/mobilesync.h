@@ -30,15 +30,17 @@ extern "C" {
 #include <libimobiledevice/libimobiledevice.h>
 
 /** @name Error Codes */
-/*@{*/
-#define MOBILESYNC_E_SUCCESS                0
-#define MOBILESYNC_E_INVALID_ARG           -1
-#define MOBILESYNC_E_PLIST_ERROR           -2
-#define MOBILESYNC_E_MUX_ERROR             -3
-#define MOBILESYNC_E_BAD_VERSION           -4
+typedef enum {
+	MOBILESYNC_E_SUCCESS            =    0,
+	MOBILESYNC_E_INVALID_ARG        =   -1,
+	MOBILESYNC_E_PLIST_ERROR        =   -2,
+	MOBILESYNC_E_MUX_ERROR          =   -3,
+	MOBILESYNC_E_BAD_VERSION        =   -4,
+	MOBILESYNC_E_UNKNOWN_ERROR      = -256
+} MobileSyncErrorEnum;
 
-#define MOBILESYNC_E_UNKNOWN_ERROR       -256
-/*@}*/
+#define MOBILESYNC_CLIENT_ERROR mobilesync_client_error_quark()
+GQuark       mobilesync_client_error_quark      (void);
 
 /** Represents an error code. */
 typedef int16_t mobilesync_error_t;
@@ -46,10 +48,10 @@ typedef int16_t mobilesync_error_t;
 typedef struct mobilesync_client_private mobilesync_client_private;
 typedef mobilesync_client_private *mobilesync_client_t; /**< The client handle */
 
-mobilesync_error_t mobilesync_client_new(idevice_t device, uint16_t port, mobilesync_client_t * client);
-mobilesync_error_t mobilesync_client_free(mobilesync_client_t client);
-mobilesync_error_t mobilesync_receive(mobilesync_client_t client, plist_t *plist);
-mobilesync_error_t mobilesync_send(mobilesync_client_t client, plist_t plist);
+mobilesync_client_t mobilesync_client_new(idevice_t device, uint16_t port, GError **error);
+void mobilesync_client_free(mobilesync_client_t client, GError **error);
+plist_t mobilesync_receive(mobilesync_client_t client, GError **error);
+void mobilesync_send(mobilesync_client_t client, plist_t plist, GError **error);
 
 #ifdef __cplusplus
 }

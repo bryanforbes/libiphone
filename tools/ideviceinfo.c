@@ -278,29 +278,35 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	GError *error = NULL;
 	if (uuid[0] != 0) {
-		ret = idevice_new(&phone, uuid);
-		if (ret != IDEVICE_E_SUCCESS) {
+		phone = idevice_new(uuid, &error);
+		if (error != NULL) {
 			printf("No device found with uuid %s, is it plugged in?\n", uuid);
+			g_error_free(error);
 			return -1;
 		}
 	}
 	else
 	{
-		ret = idevice_new(&phone, NULL);
-		if (ret != IDEVICE_E_SUCCESS) {
+		phone = idevice_new(NULL, &error);
+		if (error != NULL) {
 			printf("No device found, is it plugged in?\n");
+			g_error_free(error);
 			return -1;
 		}
 	}
 
-	if (LOCKDOWN_E_SUCCESS != lockdownd_client_new_with_handshake(phone, &client, "ideviceinfo")) {
+	client = lockdownd_client_new_with_handshake(phone, "ideviceinfo", &error);
+	if (error != NULL) {
 		idevice_free(phone);
+		g_error_free(error);
 		return -1;
 	}
 
 	/* run query and output information */
-	if(lockdownd_get_value(client, domain, key, &node) == LOCKDOWN_E_SUCCESS) {
+	node = lockdownd_get_value(client, domain, key, &error);
+	if(error == NULL) {
 		if (node) {
 			switch (format) {
 			case FORMAT_XML:
@@ -328,7 +334,9 @@ int main(int argc, char *argv[])
 
 	if (domain != NULL)
 		free(domain);
-	lockdownd_client_free(client);
+	if (error != NULL)
+		g_error_free(error);
+	lockdownd_client_free(client, NULL);
 	idevice_free(phone);
 
 	return 0;

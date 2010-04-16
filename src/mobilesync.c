@@ -30,6 +30,12 @@
 #define MSYNC_VERSION_INT1 100
 #define MSYNC_VERSION_INT2 100
 
+GQuark
+mobilesync_client_error_quark (void)
+{
+  return g_quark_from_static_string ("mobilesync-client-error-quark");
+}
+
 /**
  * Convert an device_link_service_error_t value to an mobilesync_error_t value.
  * Used internally to get correct error codes when using device_link_service stuff.
@@ -70,32 +76,30 @@ static mobilesync_error_t mobilesync_error(device_link_service_error_t err)
  *     or more parameters are invalid, or DEVICE_LINK_SERVICE_E_BAD_VERSION if
  *     the mobilesync version on the device is newer.
  */
-mobilesync_error_t mobilesync_client_new(idevice_t device, uint16_t port,
-						   mobilesync_client_t * client)
+mobilesync_client_t mobilesync_client_new(idevice_t device, uint16_t port, GError **error)
 {
-	if (!device || port == 0 || !client || *client)
-		return MOBILESYNC_E_INVALID_ARG;
+	g_assert(device != NULL && port > 0);
 
-	device_link_service_client_t dlclient = NULL;
-	mobilesync_error_t ret = mobilesync_error(device_link_service_client_new(device, port, &dlclient));
-	if (ret != MOBILESYNC_E_SUCCESS) {
-		return ret;
+	GError *tmp_error = NULL;
+	device_link_service_client_t dlclient = device_link_service_client_new(device, port, &tmp_error);
+	if (tmp_error != NULL) {
+		g_propagate_error(error, tmp_error);
+		return NULL;
 	}
 
 	mobilesync_client_t client_loc = (mobilesync_client_t) malloc(sizeof(struct mobilesync_client_private));
 	client_loc->parent = dlclient;
 
 	/* perform handshake */
-	ret = mobilesync_error(device_link_service_version_exchange(dlclient, MSYNC_VERSION_INT1, MSYNC_VERSION_INT2));
-	if (ret != MOBILESYNC_E_SUCCESS) {
-		debug_info("version exchange failed, error %d", ret);
-		mobilesync_client_free(client_loc);
-		return ret;
+	device_link_service_version_exchange(dlclient, MSYNC_VERSION_INT1, MSYNC_VERSION_INT2, &tmp_error);
+	if (tmp_error != NULL) {
+		debug_info("version exchange failed, error %d, reason %s", tmp_error->code, tmp_error->message);
+		mobilesync_client_free(client_loc, NULL);
+		g_propagate_error(error, tmp_error);
+		return NULL;
 	}
 
-	*client = client_loc;
-
-	return ret;
+	return client_loc;
 }
 
 /**
@@ -107,14 +111,14 @@ mobilesync_error_t mobilesync_client_new(idevice_t device, uint16_t port,
  * @return MOBILESYNC_E_SUCCESS on success, or MOBILESYNC_E_INVALID_ARG
  *     if client is NULL.
  */
-mobilesync_error_t mobilesync_client_free(mobilesync_client_t client)
+void mobilesync_client_free(mobilesync_client_t client, GError **error)
 {
-	if (!client)
-		return MOBILESYNC_E_INVALID_ARG;
-	device_link_service_disconnect(client->parent);
-	mobilesync_error_t err = mobilesync_error(device_link_service_client_free(client->parent));
+	g_assert(client != NULL);
+
+	device_link_service_disconnect(client->parent, NULL);
+
+	device_link_service_client_free(client->parent, error);
 	free(client);
-	return err;
 }
 
 /**
@@ -125,12 +129,11 @@ mobilesync_error_t mobilesync_client_free(mobilesync_client_t client)
  *
  * @return an error code
  */
-mobilesync_error_t mobilesync_receive(mobilesync_client_t client, plist_t * plist)
+plist_t mobilesync_receive(mobilesync_client_t client, GError **error)
 {
-	if (!client)
-		return MOBILESYNC_E_INVALID_ARG;
-	mobilesync_error_t ret = mobilesync_error(device_link_service_receive(client->parent, plist));
-	return ret;
+	g_assert(client != NULL);
+	
+	return device_link_service_receive(client->parent, error);
 }
 
 /**
@@ -144,9 +147,8 @@ mobilesync_error_t mobilesync_receive(mobilesync_client_t client, plist_t * plis
  *
  * @return an error code
  */
-mobilesync_error_t mobilesync_send(mobilesync_client_t client, plist_t plist)
+void mobilesync_send(mobilesync_client_t client, plist_t plist, GError **error)
 {
-	if (!client || !plist)
-		return MOBILESYNC_E_INVALID_ARG;
-	return mobilesync_error(device_link_service_send(client->parent, plist));
+	g_assert(client != NULL && plist != NULL);
+	device_link_service_send(client->parent, plist, error);
 }

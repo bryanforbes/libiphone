@@ -81,7 +81,7 @@ static plist_t mobilebackup_factory_info_plist_new()
 	plist_t ret = plist_new_dict();
 
 	/* get basic device information in one go */
-	lockdownd_get_value(client, NULL, NULL, &root_node);
+	root_node = lockdownd_get_value(client, NULL, NULL, NULL);
 
 	/* set fields we understand */
 	value_node = plist_dict_get_item(root_node, "BuildVersion");
@@ -111,7 +111,7 @@ static plist_t mobilebackup_factory_info_plist_new()
 	plist_dict_insert_item(ret, "Serial Number", plist_copy(value_node));
 
 	value_node = plist_dict_get_item(root_node, "UniqueDeviceID");
-	idevice_get_uuid(phone, &uuid);
+	uuid = idevice_get_uuid(phone, NULL);
 	plist_dict_insert_item(ret, "Target Identifier", plist_new_string(uuid));
 
 	/* uppercase */
@@ -283,7 +283,7 @@ static int mobilebackup_info_is_current_device(plist_t info)
 		return ret;
 
 	/* get basic device information in one go */
-	lockdownd_get_value(client, NULL, NULL, &root_node);
+	root_node = lockdownd_get_value(client, NULL, NULL, NULL);
 
 	/* verify UUID */
 	value_node = plist_dict_get_item(root_node, "UniqueDeviceID");
@@ -362,18 +362,22 @@ static void do_post_notification(const char *notification)
 	uint16_t nport = 0;
 	np_client_t np;
 
+	GError *error = NULL;
+
 	if (!client) {
-		if (lockdownd_client_new_with_handshake(phone, &client, "idevicebackup") != LOCKDOWN_E_SUCCESS) {
+		client = lockdownd_client_new_with_handshake(phone, "idevicebackup", &error);
+		if (error != NULL) {
+			g_error_free(error);
 			return;
 		}
 	}
 
-	lockdownd_start_service(client, NP_SERVICE_NAME, &nport);
+	nport = lockdownd_start_service(client, NP_SERVICE_NAME, NULL);
 	if (nport) {
-		np_client_new(phone, nport, &np);
+		np = np_client_new(phone, nport, NULL);
 		if (np) {
-			np_post_notification(np, notification);
-			np_client_free(np);
+			np_post_notification(np, notification, NULL);
+			np_client_free(np, NULL);
 		}
 	} else {
 		printf("Could not start %s\n", NP_SERVICE_NAME);
@@ -407,7 +411,6 @@ static void print_usage(int argc, char **argv)
 
 int main(int argc, char *argv[])
 {
-	idevice_error_t ret = IDEVICE_E_UNKNOWN_ERROR;
 	int i;
 	char uuid[41];
 	uint16_t port = 0;
@@ -497,33 +500,38 @@ int main(int argc, char *argv[])
 
 	printf("Backup directory is \"%s\"\n", backup_directory);
 
+	GError *error = NULL;
 	if (uuid[0] != 0) {
-		ret = idevice_new(&phone, uuid);
-		if (ret != IDEVICE_E_SUCCESS) {
+		phone = idevice_new(uuid, &error);
+		if (error != NULL) {
 			printf("No device found with uuid %s, is it plugged in?\n", uuid);
+			g_error_free(error);
 			return -1;
 		}
 	}
 	else
 	{
-		ret = idevice_new(&phone, NULL);
-		if (ret != IDEVICE_E_SUCCESS) {
+		phone = idevice_new(NULL, &error);
+		if (error != NULL) {
 			printf("No device found, is it plugged in?\n");
+			g_error_free(error);
 			return -1;
 		}
 	}
 
-	if (LOCKDOWN_E_SUCCESS != lockdownd_client_new_with_handshake(phone, &client, "idevicebackup")) {
+	client = lockdownd_client_new_with_handshake(phone, "idevicebackup", &error);
+	if (error != NULL) {
 		idevice_free(phone);
+		g_error_free(error);
 		return -1;
 	}
 
 	/* start notification_proxy */
 	np_client_t np = NULL;
-	ret = lockdownd_start_service(client, NP_SERVICE_NAME, &port);
-	if ((ret == LOCKDOWN_E_SUCCESS) && port) {
-		np_client_new(phone, port, &np);
-		np_set_notify_callback(np, notify_cb, NULL);
+	port = lockdownd_start_service(client, NP_SERVICE_NAME, &error);
+	if ((error == NULL) && port) {
+		np = np_client_new(phone, port, NULL);
+		np_set_notify_callback(np, notify_cb, NULL, NULL);
 		const char *noties[5] = {
 			NP_SYNC_CANCEL_REQUEST,
 			NP_SYNC_SUSPEND_REQUEST,
@@ -531,7 +539,7 @@ int main(int argc, char *argv[])
 			NP_BACKUP_DOMAIN_CHANGED,
 			NULL
 		};
-		np_observe_notifications(np, noties);
+		np_observe_notifications(np, noties, NULL);
 	} else {
 		printf("ERROR: Could not start service %s.\n", NP_SERVICE_NAME);
 	}
@@ -539,17 +547,17 @@ int main(int argc, char *argv[])
 	/* start AFC, we need this for the lock file */
 	afc_client_t afc = NULL;
 	port = 0;
-	ret = lockdownd_start_service(client, "com.apple.afc", &port);
-	if ((ret == LOCKDOWN_E_SUCCESS) && port) {
-		afc_client_new(phone, port, &afc);
+	port = lockdownd_start_service(client, "com.apple.afc", &error);
+	if ((error == NULL) && port) {
+		afc = afc_client_new(phone, port, NULL);
 	}
 
 	/* start syslog_relay service and retrieve port */
 	port = 0;
-	ret = lockdownd_start_service(client, MOBILEBACKUP_SERVICE_NAME, &port);
-	if ((ret == LOCKDOWN_E_SUCCESS) && port) {
+	port = lockdownd_start_service(client, MOBILEBACKUP_SERVICE_NAME, &error);
+	if ((error == NULL) && port) {
 		printf("Started \"%s\" service on port %d.\n", MOBILEBACKUP_SERVICE_NAME, port);
-		mobilebackup_client_new(phone, port, &mobilebackup);
+		mobilebackup = mobilebackup_client_new(phone, port, NULL);
 
 		/* check abort conditions */
 		if (quit_flag > 0) {
@@ -582,14 +590,14 @@ int main(int argc, char *argv[])
 		}
 
 		do_post_notification(NP_SYNC_WILL_START);
-		uint64_t lockfile = 0;
-		afc_file_open(afc, "/com.apple.itunes.lock_sync", AFC_FOPEN_RW, &lockfile);
+		uint64_t lockfile = afc_file_open(afc, "/com.apple.itunes.lock_sync", AFC_FOPEN_RW, NULL);
 		if (lockfile) {
 			do_post_notification(NP_SYNC_LOCK_REQUEST);
-			if (afc_file_lock(afc, lockfile, AFC_LOCK_EX) == AFC_E_SUCCESS) {
+			afc_file_lock(afc, lockfile, AFC_LOCK_EX, &error);
+			if (error == NULL) {
 				do_post_notification(NP_SYNC_DID_START);
 			} else {
-				afc_file_close(afc, lockfile);
+				afc_file_close(afc, lockfile, NULL);
 				lockfile = 0;
 			}
 		}
@@ -633,7 +641,7 @@ int main(int argc, char *argv[])
 
 			/* close down the lockdown connection as it is no longer needed */
 			if (client) {
-				lockdownd_client_free(client);
+				lockdownd_client_free(client, NULL);
 				client = NULL;
 			}
 
@@ -643,17 +651,17 @@ int main(int argc, char *argv[])
 			/* request backup from device with manifest from last backup */
 			printf("Requesting backup from device...\n");
 
-			mobilebackup_error_t err = mobilebackup_request_backup(mobilebackup, manifest_plist, "/", "1.6");
-			if (err == MOBILEBACKUP_E_SUCCESS) {
+			mobilebackup_request_backup(mobilebackup, manifest_plist, "/", "1.6", &error);
+			if (error == NULL) {
 				if (is_full_backup)
 					printf("Full backup mode.\n");
 				else
 					printf("Incremental backup mode.\n");
 				printf("Please wait. Device is preparing backup data...\n");
 			} else {
-				if (err == MOBILEBACKUP_E_BAD_VERSION) {
+				if (error->code == MOBILEBACKUP_E_BAD_VERSION) {
 					printf("ERROR: Could not start backup process: backup protocol version mismatch!\n");
-				} else if (err == MOBILEBACKUP_E_REPLY_NOT_OK) {
+				} else if (error->code == MOBILEBACKUP_E_REPLY_NOT_OK) {
 					printf("ERROR: Could not start backup process: device refused to start the backup process.\n");
 				} else {
 					printf("ERROR: Could not start backup process: unspecified error occured\n");
@@ -680,7 +688,7 @@ int main(int argc, char *argv[])
 
 			/* process series of DLSendFile messages */
 			do {
-				mobilebackup_receive(mobilebackup, &message);
+				message = mobilebackup_receive(mobilebackup, NULL);
 				node = plist_array_get_item(message, 0);
 
 				/* get out if we don't get a DLSendFile */
@@ -802,12 +810,12 @@ int main(int argc, char *argv[])
 						printf("DONE\n");
 
 					/* acknowlegdge that we received the file */
-					mobilebackup_send_backup_file_received(mobilebackup);
+					mobilebackup_send_backup_file_received(mobilebackup, NULL);
 				}
 
 				if (quit_flag > 0) {
 					/* need to cancel the backup here */
-					mobilebackup_send_error(mobilebackup, "Cancelling DLSendFile");
+					mobilebackup_send_error(mobilebackup, "Cancelling DLSendFile", NULL);
 
 					/* remove any atomic Manifest.plist.tmp */
 					if (manifest_path)
@@ -876,7 +884,7 @@ int main(int argc, char *argv[])
 			/* read mddata/mdinfo files and send to devices using DLSendFile */
 			/* signal restore finished message to device */
 			/* close down lockdown connection as it is no longer needed */
-			lockdownd_client_free(client);
+			lockdownd_client_free(client, NULL);
 			client = NULL;
 			break;
 			case CMD_LEAVE:
@@ -884,32 +892,35 @@ int main(int argc, char *argv[])
 			break;
 		}
 		if (lockfile) {
-			afc_file_lock(afc, lockfile, AFC_LOCK_UN);
-			afc_file_close(afc, lockfile);
+			afc_file_lock(afc, lockfile, AFC_LOCK_UN, NULL);
+			afc_file_close(afc, lockfile, NULL);
 			lockfile = 0;
 			do_post_notification(NP_SYNC_DID_FINISH);
 		}
 	} else {
 		printf("ERROR: Could not start service %s.\n", MOBILEBACKUP_SERVICE_NAME);
-		lockdownd_client_free(client);
+		lockdownd_client_free(client, NULL);
 		client = NULL;
 	}
 
 	if (client) {
-		lockdownd_client_free(client);
+		lockdownd_client_free(client, NULL);
 		client = NULL;
 	}
 
 	if (afc)
-		afc_client_free(afc);
+		afc_client_free(afc, NULL);
 
 	if (np)
-		np_client_free(np);
+		np_client_free(np, NULL);
 
 	if (mobilebackup)
-		mobilebackup_client_free(mobilebackup);
+		mobilebackup_client_free(mobilebackup, NULL);
 
 	idevice_free(phone);
+
+	if (error != NULL)
+		g_error_free(error);
 
 	return 0;
 }

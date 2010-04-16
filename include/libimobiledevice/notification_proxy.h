@@ -30,14 +30,16 @@ extern "C" {
 #include <libimobiledevice/libimobiledevice.h>
 
 /** @name Error Codes */
-/*@{*/
-#define NP_E_SUCCESS                0
-#define NP_E_INVALID_ARG           -1
-#define NP_E_PLIST_ERROR           -2
-#define NP_E_CONN_FAILED           -3
+typedef enum {
+	NP_E_SUCCESS           =    0,
+	NP_E_INVALID_ARG       =   -1,
+	NP_E_PLIST_ERROR       =   -2,
+	NP_E_CONN_FAILED       =   -3,
+	NP_E_UNKNOWN_ERROR     = -256
+} NPClientErrorEnum;
 
-#define NP_E_UNKNOWN_ERROR       -256
-/*@}*/
+#define NP_CLIENT_ERROR np_client_error_quark()
+GQuark       np_client_error_quark      (void);
 
 /** Represents an error code. */
 typedef int16_t np_error_t;
@@ -89,12 +91,12 @@ typedef np_client_private *np_client_t; /**< The client handle. */
 typedef void (*np_notify_cb_t) (const char *notification, void *user_data);
 
 /* Interface */
-np_error_t np_client_new(idevice_t device, uint16_t port, np_client_t *client);
-np_error_t np_client_free(np_client_t client);
-np_error_t np_post_notification(np_client_t client, const char *notification);
-np_error_t np_observe_notification(np_client_t client, const char *notification);
-np_error_t np_observe_notifications(np_client_t client, const char **notification_spec);
-np_error_t np_set_notify_callback(np_client_t client, np_notify_cb_t notify_cb, void *userdata);
+np_client_t np_client_new(idevice_t device, uint16_t port, GError **error);
+void np_client_free(np_client_t client, GError **error);
+void np_post_notification(np_client_t client, const char *notification, GError **error);
+void np_observe_notification(np_client_t client, const char *notification, GError **error);
+void np_observe_notifications(np_client_t client, const char **notification_spec, GError **error);
+void np_set_notify_callback(np_client_t client, np_notify_cb_t notify_cb, void *userdata, GError **error);
 
 #ifdef __cplusplus
 }

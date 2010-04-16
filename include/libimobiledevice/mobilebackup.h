@@ -30,16 +30,18 @@ extern "C" {
 #include <libimobiledevice/libimobiledevice.h>
 
 /** @name Error Codes */
-/*@{*/
-#define MOBILEBACKUP_E_SUCCESS                0
-#define MOBILEBACKUP_E_INVALID_ARG           -1
-#define MOBILEBACKUP_E_PLIST_ERROR           -2
-#define MOBILEBACKUP_E_MUX_ERROR             -3
-#define MOBILEBACKUP_E_BAD_VERSION           -4
-#define MOBILEBACKUP_E_REPLY_NOT_OK          -5
+typedef enum {
+	MOBILEBACKUP_E_SUCCESS            =    0,
+	MOBILEBACKUP_E_INVALID_ARG        =   -1,
+	MOBILEBACKUP_E_PLIST_ERROR        =   -2,
+	MOBILEBACKUP_E_MUX_ERROR          =   -3,
+	MOBILEBACKUP_E_BAD_VERSION        =   -4,
+	MOBILEBACKUP_E_REPLY_NOT_OK       =   -5,
+	MOBILEBACKUP_E_UNKNOWN_ERROR      = -256
+} MobileBackupClientErrorEnum;
 
-#define MOBILEBACKUP_E_UNKNOWN_ERROR       -256
-/*@}*/
+#define MOBILEBACKUP_CLIENT_ERROR mobilebackup_client_error_quark()
+GQuark       mobilebackup_client_error_quark      (void);
 
 /** Represents an error code. */
 typedef int16_t mobilebackup_error_t;
@@ -47,13 +49,13 @@ typedef int16_t mobilebackup_error_t;
 typedef struct mobilebackup_client_private mobilebackup_client_private;
 typedef mobilebackup_client_private *mobilebackup_client_t; /**< The client handle. */
 
-mobilebackup_error_t mobilebackup_client_new(idevice_t device, uint16_t port, mobilebackup_client_t * client);
-mobilebackup_error_t mobilebackup_client_free(mobilebackup_client_t client);
-mobilebackup_error_t mobilebackup_receive(mobilebackup_client_t client, plist_t *plist);
-mobilebackup_error_t mobilebackup_send(mobilebackup_client_t client, plist_t plist);
-mobilebackup_error_t mobilebackup_request_backup(mobilebackup_client_t client, plist_t backup_manifest, const char *base_path, const char *proto_version);
-mobilebackup_error_t mobilebackup_send_backup_file_received(mobilebackup_client_t client);
-mobilebackup_error_t mobilebackup_send_error(mobilebackup_client_t client, const char *reason);
+mobilebackup_client_t mobilebackup_client_new(idevice_t device, uint16_t port, GError **error);
+void mobilebackup_client_free(mobilebackup_client_t client, GError **error);
+plist_t mobilebackup_receive(mobilebackup_client_t client, GError **error);
+void mobilebackup_send(mobilebackup_client_t client, plist_t plist, GError **error);
+void mobilebackup_request_backup(mobilebackup_client_t client, plist_t backup_manifest, const char *base_path, const char *proto_version, GError **error);
+void mobilebackup_send_backup_file_received(mobilebackup_client_t client, GError **error);
+void mobilebackup_send_error(mobilebackup_client_t client, const char *reason, GError **error);
 
 #ifdef __cplusplus
 }

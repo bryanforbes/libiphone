@@ -28,6 +28,12 @@
 #include "property_list_service.h"
 #include "debug.h"
 
+GQuark
+np_client_error_quark (void)
+{
+  return g_quark_from_static_string ("np-client-error-quark");
+}
+
 struct np_thread {
 	np_client_t client;
 	np_notify_cb_t cbfunc;
@@ -57,32 +63,6 @@ static void np_unlock(np_client_t client)
 }
 
 /**
- * Convert a property_list_service_error_t value to an np_error_t value.
- * Used internally to get correct error codes.
- *
- * @param err A property_list_service_error_t error code
- *
- * @return A matching np_error_t error code,
- *     NP_E_UNKNOWN_ERROR otherwise.
- */
-static np_error_t np_error(property_list_service_error_t err)
-{
-	switch (err) {
-		case PROPERTY_LIST_SERVICE_E_SUCCESS:
-			return NP_E_SUCCESS;
-		case PROPERTY_LIST_SERVICE_E_INVALID_ARG:
-			return NP_E_INVALID_ARG;
-		case PROPERTY_LIST_SERVICE_E_PLIST_ERROR:
-			return NP_E_PLIST_ERROR;
-		case PROPERTY_LIST_SERVICE_E_MUX_ERROR:
-			return NP_E_CONN_FAILED;
-		default:
-			break;
-	}
-	return NP_E_UNKNOWN_ERROR;
-}
-
-/**
  * Connects to the notification_proxy on the specified device.
  * 
  * @param device The device to connect to.
@@ -94,18 +74,19 @@ static np_error_t np_error(property_list_service_error_t err)
  *   or NP_E_CONN_FAILED when the connection to the device could not be
  *   established.
  */
-np_error_t np_client_new(idevice_t device, uint16_t port, np_client_t *client)
+np_client_t np_client_new(idevice_t device, uint16_t port, GError **error)
 {
 	/* makes sure thread environment is available */
 	if (!g_thread_supported())
 		g_thread_init(NULL);
 
-	if (!device)
-		return NP_E_INVALID_ARG;
+	g_assert(device != NULL && port > 0);
 
-	property_list_service_client_t plistclient = NULL;
-	if (property_list_service_client_new(device, port, &plistclient) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		return NP_E_CONN_FAILED;
+	GError *tmp_error = NULL;
+	property_list_service_client_t plistclient = property_list_service_client_new(device, port, &tmp_error);
+	if (tmp_error != NULL) {
+		g_propagate_error(error, tmp_error);
+		return NULL;
 	}
 
 	np_client_t client_loc = (np_client_t) malloc(sizeof(struct np_client_private));
@@ -115,8 +96,7 @@ np_error_t np_client_new(idevice_t device, uint16_t port, np_client_t *client)
 
 	client_loc->notifier = NULL;
 
-	*client = client_loc;
-	return NP_E_SUCCESS;
+	return client_loc;
 }
 
 /**
@@ -127,12 +107,11 @@ np_error_t np_client_new(idevice_t device, uint16_t port, np_client_t *client)
  *
  * @return NP_E_SUCCESS on success, or NP_E_INVALID_ARG when client is NULL.
  */
-np_error_t np_client_free(np_client_t client)
+void np_client_free(np_client_t client, GError **error)
 {
-	if (!client)
-		return NP_E_INVALID_ARG;
+	g_assert(client != NULL);
 
-	property_list_service_client_free(client->parent);
+	property_list_service_client_free(client->parent, error);
 	client->parent = NULL;
 	if (client->notifier) {
 		debug_info("joining np callback");
@@ -142,8 +121,6 @@ np_error_t np_client_free(np_client_t client)
 		g_mutex_free(client->mutex);
 	}
 	free(client);
-
-	return NP_E_SUCCESS;
 }
 
 /**
@@ -154,32 +131,32 @@ np_error_t np_client_free(np_client_t client)
  *
  * @return NP_E_SUCCESS on success, or an error returned by np_plist_send
  */
-np_error_t np_post_notification(np_client_t client, const char *notification)
+void np_post_notification(np_client_t client, const char *notification, GError **error)
 {
-	if (!client || !notification) {
-		return NP_E_INVALID_ARG;
-	}
+	g_assert(client != NULL && notification != NULL);
+
 	np_lock(client);
 
 	plist_t dict = plist_new_dict();
 	plist_dict_insert_item(dict,"Command", plist_new_string("PostNotification"));
 	plist_dict_insert_item(dict,"Name", plist_new_string(notification));
 
-	np_error_t res = np_error(property_list_service_send_xml_plist(client->parent, dict));
+	property_list_service_send_xml_plist(client->parent, dict, NULL); // ignore errors
 	plist_free(dict);
 
 	dict = plist_new_dict();
 	plist_dict_insert_item(dict,"Command", plist_new_string("Shutdown"));
 
-	res = np_error(property_list_service_send_xml_plist(client->parent, dict));
+	GError *tmp_error = NULL;
+	property_list_service_send_xml_plist(client->parent, dict, &tmp_error);
 	plist_free(dict);
 
-	if (res != NP_E_SUCCESS) {
+	if (tmp_error != NULL) {
 		debug_info("Error sending XML plist to device!");
+		g_propagate_error(error, tmp_error);
 	}
 
 	np_unlock(client);
-	return res;
 }
 
 /**
@@ -191,25 +168,25 @@ np_error_t np_post_notification(np_client_t client, const char *notification)
  * @return NP_E_SUCCESS on success, NP_E_INVALID_ARG when client or
  *    notification are NULL, or an error returned by np_plist_send.
  */
-np_error_t np_observe_notification( np_client_t client, const char *notification )
+void np_observe_notification(np_client_t client, const char *notification, GError **error)
 {
-	if (!client || !notification) {
-		return NP_E_INVALID_ARG;
-	}
+	g_assert(client != NULL && notification != NULL);
+
 	np_lock(client);
 
 	plist_t dict = plist_new_dict();
 	plist_dict_insert_item(dict,"Command", plist_new_string("ObserveNotification"));
 	plist_dict_insert_item(dict,"Name", plist_new_string(notification));
 
-	np_error_t res = np_error(property_list_service_send_xml_plist(client->parent, dict));
-	if (res != NP_E_SUCCESS) {
+	GError *tmp_error = NULL;
+	property_list_service_send_xml_plist(client->parent, dict, &tmp_error);
+	if (tmp_error != NULL) {
 		debug_info("Error sending XML plist to device!");
+		g_propagate_error(error, tmp_error);
 	}
 	plist_free(dict);
 
 	np_unlock(client);
-	return res;
 }
 
 /**
@@ -223,29 +200,22 @@ np_error_t np_observe_notification( np_client_t client, const char *notification
  * @return NP_E_SUCCESS on success, NP_E_INVALID_ARG when client is null,
  *   or an error returned by np_observe_notification.
  */
-np_error_t np_observe_notifications(np_client_t client, const char **notification_spec)
+void np_observe_notifications(np_client_t client, const char **notification_spec, GError **error)
 {
 	int i = 0;
-	np_error_t res = NP_E_UNKNOWN_ERROR;
 	const char **notifications = notification_spec;
 
-	if (!client) {
-		return NP_E_INVALID_ARG;
-	}
+	g_assert(client != NULL && notifications != NULL);
 
-	if (!notifications) {
-		return NP_E_INVALID_ARG;
-	}
-
+	GError *tmp_error = NULL;
 	while (notifications[i]) {
-		res = np_observe_notification(client, notifications[i]);
-		if (res != NP_E_SUCCESS) {
+		np_observe_notification(client, notifications[i], &tmp_error);
+		if (tmp_error != NULL) {
+			g_propagate_error(error, tmp_error);
 			break;
 		}
 		i++;
 	}
-
-	return res;
 }
 
 /**
@@ -263,15 +233,17 @@ np_error_t np_observe_notifications(np_client_t client, const char **notificatio
  */
 static int np_get_notification(np_client_t client, char **notification)
 {
+	g_assert(client != NULL && client->parent != NULL && *notification == NULL);
+
 	int res = 0;
 	plist_t dict = NULL;
-
-	if (!client || !client->parent || *notification)
-		return -1;
+	GError *tmp_error = NULL;
 
 	np_lock(client);
 
-	property_list_service_receive_plist_with_timeout(client->parent, &dict, 500);
+	dict = property_list_service_receive_plist_with_timeout(client->parent, 500, &tmp_error);
+	g_clear_error(&tmp_error);
+
 	if (!dict) {
 		debug_info("NotificationProxy: no notification received!");
 		res = 0;
@@ -364,12 +336,13 @@ gpointer np_notifier( gpointer arg )
  *         NP_E_INVALID_ARG when client is NULL, or NP_E_UNKNOWN_ERROR when
  *         the callback thread could no be created.
  */
-np_error_t np_set_notify_callback( np_client_t client, np_notify_cb_t notify_cb, void *user_data )
+void np_set_notify_callback( np_client_t client, np_notify_cb_t notify_cb, void *user_data , GError **error)
 {
-	if (!client)
-		return NP_E_INVALID_ARG;
+	g_assert(client != NULL);
 
-	np_error_t res = NP_E_UNKNOWN_ERROR;
+	g_set_error(error, NP_CLIENT_ERROR,
+		NP_E_UNKNOWN_ERROR,
+		"Unknown error");
 
 	np_lock(client);
 	if (client->notifier) {
@@ -390,13 +363,11 @@ np_error_t np_set_notify_callback( np_client_t client, np_notify_cb_t notify_cb,
 
 			client->notifier = g_thread_create(np_notifier, npt, TRUE, NULL);
 			if (client->notifier) {
-				res = NP_E_SUCCESS;
+				g_clear_error(error);
 			}
 		}
 	} else {
 		debug_info("no callback set");
 	}
 	np_unlock(client);
-
-	return res;
 }

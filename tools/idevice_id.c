@@ -61,26 +61,32 @@ int main(int argc, char **argv)
 		strcpy(uuid, argv[i]);
 	}
 
+	GError *error = NULL;
 	switch (mode) {
 	case MODE_SHOW_ID:
-		idevice_new(&phone, uuid);
-		if (!phone) {
+		phone = idevice_new(uuid, &error);
+		if (error != NULL) {
 			fprintf(stderr, "ERROR: No device with UUID=%s attached.\n", uuid);
+			g_error_free(error);
 			return -2;
 		}
 
-		if (LOCKDOWN_E_SUCCESS != lockdownd_client_new(phone, &client, "idevice_id")) {
+		client = lockdownd_client_new(phone, "idevice_id", &error);
+		if (error != NULL) {
 			idevice_free(phone);
 			fprintf(stderr, "ERROR: Connecting to device failed!\n");
+			g_error_free(error);
 			return -2;
 		}
 
-		if ((LOCKDOWN_E_SUCCESS != lockdownd_get_device_name(client, &devname)) || !devname) {
+		devname = lockdownd_get_device_name(client, &error);
+
+		if (error != NULL || devname == NULL) {
 			fprintf(stderr, "ERROR: Could not get device name!\n");
 			ret = -2;
 		}
 
-		lockdownd_client_free(client);
+		lockdownd_client_free(client, NULL);
 		idevice_free(phone);
 
 		if (ret == 0) {
@@ -91,11 +97,17 @@ int main(int argc, char **argv)
 			free(devname);
 		}
 
+		if (error) {
+			g_error_free(error);
+		}
+
 		return ret;
 	case MODE_LIST_DEVICES:
 	default:
-		if (idevice_get_device_list(&dev_list, &i) < 0) {
+		idevice_get_device_list(&dev_list, &i, &error);
+		if (error != NULL) {
 			fprintf(stderr, "ERROR: Unable to retrieve device list!\n");
+			g_error_free(error);
 			return -1;
 		}
 		for (i = 0; dev_list[i] != NULL; i++) {

@@ -30,6 +30,12 @@
 #define SCREENSHOTR_VERSION_INT1 100
 #define SCREENSHOTR_VERSION_INT2 0
 
+GQuark
+screenshotr_client_error_quark (void)
+{
+  return g_quark_from_static_string ("screenshotr-client-error-quark");
+}
+
 /**
  * Convert a device_link_service_error_t value to a screenshotr_error_t value.
  * Used internally to get correct error codes.
@@ -73,32 +79,30 @@ static screenshotr_error_t screenshotr_error(device_link_service_error_t err)
  *     or more parameters are invalid, or SCREENSHOTR_E_CONN_FAILED if the
  *     connection to the device could not be established.
  */
-screenshotr_error_t screenshotr_client_new(idevice_t device, uint16_t port,
-					   screenshotr_client_t * client)
+screenshotr_client_t screenshotr_client_new(idevice_t device, uint16_t port, GError **error)
 {
-	if (!device || port == 0 || !client || *client)
-		return SCREENSHOTR_E_INVALID_ARG;
+	g_assert(device != NULL && port > 0);
 
-	device_link_service_client_t dlclient = NULL;
-	screenshotr_error_t ret = screenshotr_error(device_link_service_client_new(device, port, &dlclient));
-	if (ret != SCREENSHOTR_E_SUCCESS) {
-		return ret;
+	GError *tmp_error = NULL;
+	device_link_service_client_t dlclient = device_link_service_client_new(device, port, &tmp_error);
+	if (tmp_error != NULL) {
+		g_propagate_error(error, tmp_error);
+		return NULL;
 	}
 
 	screenshotr_client_t client_loc = (screenshotr_client_t) malloc(sizeof(struct screenshotr_client_private));
 	client_loc->parent = dlclient;
 
 	/* perform handshake */
-	ret = screenshotr_error(device_link_service_version_exchange(dlclient, SCREENSHOTR_VERSION_INT1, SCREENSHOTR_VERSION_INT2));
-	if (ret != SCREENSHOTR_E_SUCCESS) {
-		debug_info("version exchange failed, error %d", ret);
-		screenshotr_client_free(client_loc);
-		return ret;
+	device_link_service_version_exchange(dlclient, SCREENSHOTR_VERSION_INT1, SCREENSHOTR_VERSION_INT2, &tmp_error);
+	if (tmp_error != NULL) {
+		debug_info("version exchange failed, error %d, reason %s", tmp_error->code, tmp_error->message);
+		screenshotr_client_free(client_loc, NULL);
+		g_propagate_error(error, tmp_error);
+		return NULL;
 	}
 
-	*client = client_loc;
-
-	return ret;
+	return client_loc;
 }
 
 /**
@@ -110,14 +114,17 @@ screenshotr_error_t screenshotr_client_new(idevice_t device, uint16_t port,
  * @return SCREENSHOTR_E_SUCCESS on success, or SCREENSHOTR_E_INVALID_ARG
  *     if client is NULL.
  */
-screenshotr_error_t screenshotr_client_free(screenshotr_client_t client)
+void screenshotr_client_free(screenshotr_client_t client, GError **error)
 {
-	if (!client)
-		return SCREENSHOTR_E_INVALID_ARG;
-	device_link_service_disconnect(client->parent);
-	screenshotr_error_t err = screenshotr_error(device_link_service_client_free(client->parent));
+	g_assert(client != NULL);
+
+	device_link_service_disconnect(client->parent, NULL);
+
+	GError *tmp_error = NULL;
+	device_link_service_client_free(client->parent, &tmp_error);
 	free(client);
-	return err;
+	if (tmp_error != NULL)
+		g_propagate_error(error, tmp_error);
 }
 
 /**
@@ -134,32 +141,34 @@ screenshotr_error_t screenshotr_client_free(screenshotr_client_t client)
  *     one or more parameters are invalid, or another error code if an
  *     error occured.
  */
-screenshotr_error_t screenshotr_take_screenshot(screenshotr_client_t client, char **imgdata, uint64_t *imgsize)
+void screenshotr_take_screenshot(screenshotr_client_t client, char **imgdata, uint64_t *imgsize, GError **error)
 {
-	if (!client || !client->parent || !imgdata)
-		return SCREENSHOTR_E_INVALID_ARG;
-
-	screenshotr_error_t res = SCREENSHOTR_E_UNKNOWN_ERROR;
+	g_assert(client != NULL && client->parent != NULL && imgdata != NULL);
 
 	plist_t dict = plist_new_dict();
 	plist_dict_insert_item(dict, "MessageType", plist_new_string("ScreenShotRequest"));
 
-	res = screenshotr_error(device_link_service_send_process_message(client->parent, dict));
+	GError *tmp_error = NULL;
+	device_link_service_send_process_message(client->parent, dict, &tmp_error);
 	plist_free(dict);
-	if (res != SCREENSHOTR_E_SUCCESS) {
-		debug_info("could not send plist, error %d", res);
-		return res;
+	if (tmp_error != NULL) {
+		debug_info("could not send plist, error %d, reason %s", tmp_error->code, tmp_error->message);
+		g_propagate_error(error, tmp_error);
+		return;
 	}
 
 	dict = NULL;
-	res = screenshotr_error(device_link_service_receive_process_message(client->parent, &dict));
-	if (res != SCREENSHOTR_E_SUCCESS) {
-		debug_info("could not get screenshot data, error %d", res);
+	dict = device_link_service_receive_process_message(client->parent, &tmp_error);
+	if (tmp_error != NULL) {
+		debug_info("could not get screenshot data, error %d, reason %s", tmp_error->code, tmp_error->message);
+		g_propagate_error(error, tmp_error);
 		goto leave;
 	}
 	if (!dict) {
 		debug_info("did not receive screenshot data!");
-		res = SCREENSHOTR_E_PLIST_ERROR;
+		g_set_error(error, SCREENSHOTR_CLIENT_ERROR,
+			SCREENSHOTR_E_PLIST_ERROR,
+			"Did not receive screenshot data");
 		goto leave;
 	}
 
@@ -168,22 +177,22 @@ screenshotr_error_t screenshotr_take_screenshot(screenshotr_client_t client, cha
 	plist_get_string_val(node, &strval);
 	if (!strval || strcmp(strval, "ScreenShotReply")) {
 		debug_info("invalid screenshot data received!");
-		res = SCREENSHOTR_E_PLIST_ERROR;
+		g_set_error(error, SCREENSHOTR_CLIENT_ERROR,
+			SCREENSHOTR_E_PLIST_ERROR,
+			"Invalid screenshot data received");
 		goto leave;
 	}
 	node = plist_dict_get_item(dict, "ScreenShotData");
 	if (!node || plist_get_node_type(node) != PLIST_DATA) {
 		debug_info("no PNG data received!");
-		res = SCREENSHOTR_E_PLIST_ERROR;
+		g_set_error(error, SCREENSHOTR_CLIENT_ERROR,
+			SCREENSHOTR_E_PLIST_ERROR,
+			"No PNG data received");
 		goto leave;
 	}
 
 	plist_get_data_val(node, imgdata, imgsize);
-	res = SCREENSHOTR_E_SUCCESS;
-
 leave:
 	if (dict)
 		plist_free(dict);
-
-	return res;
 }

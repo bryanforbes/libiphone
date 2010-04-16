@@ -46,7 +46,6 @@ int main(int argc, char *argv[])
 {
 	lockdownd_client_t client = NULL;
 	idevice_t phone = NULL;
-	idevice_error_t ret = IDEVICE_E_UNKNOWN_ERROR;
 	int i;
 	char uuid[41];
 	uint16_t port = 0;
@@ -82,42 +81,48 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	GError *error = NULL;
 	if (uuid[0] != 0) {
-		ret = idevice_new(&phone, uuid);
-		if (ret != IDEVICE_E_SUCCESS) {
+		phone = idevice_new(uuid, &error);
+		if (error != NULL) {
 			printf("No device found with uuid %s, is it plugged in?\n", uuid);
+			g_error_free(error);
 			return -1;
 		}
 	}
 	else
 	{
-		ret = idevice_new(&phone, NULL);
-		if (ret != IDEVICE_E_SUCCESS) {
+		phone = idevice_new(NULL, &error);
+		if (error != NULL) {
 			printf("No device found, is it plugged in?\n");
+			g_error_free(error);
 			return -1;
 		}
 	}
 
-	if (LOCKDOWN_E_SUCCESS != lockdownd_client_new_with_handshake(phone, &client, "idevicesyslog")) {
+	client = lockdownd_client_new_with_handshake(phone, "idevicesyslog", &error);
+	if (error != NULL) {
 		idevice_free(phone);
+		g_error_free(error);
 		return -1;
 	}
 
 	/* start syslog_relay service and retrieve port */
-	ret = lockdownd_start_service(client, "com.apple.syslog_relay", &port);
-	if ((ret == LOCKDOWN_E_SUCCESS) && port) {
-		lockdownd_client_free(client);
+	port = lockdownd_start_service(client, "com.apple.syslog_relay", &error);
+	if ((error == NULL) && port) {
+		lockdownd_client_free(client, NULL);
 		
 		/* connect to socket relay messages */
-		idevice_connection_t conn = NULL;
-		if ((idevice_connect(phone, port, &conn) != IDEVICE_E_SUCCESS) || !conn) {
+		idevice_connection_t conn = idevice_connect(phone, port, &error);
+		if ((error != NULL) || !conn) {
 			printf("ERROR: Could not open usbmux connection.\n");
+			g_error_free(error);
 		} else {
 			while (!quit_flag) {
 				char *receive = NULL;
 				uint32_t datalen = 0, bytes = 0, recv_bytes = 0;
 
-				ret = idevice_connection_receive(conn, (char *) &datalen, sizeof(datalen), &bytes);
+				idevice_connection_receive(conn, (char *) &datalen, sizeof(datalen), &bytes, NULL);
 				datalen = GUINT32_FROM_BE(datalen);
 
 				if (datalen == 0)
@@ -127,7 +132,7 @@ int main(int argc, char *argv[])
 				receive = (char *) malloc(sizeof(char) * datalen);
 
 				while (!quit_flag && (recv_bytes <= datalen)) {
-					ret = idevice_connection_receive(conn, receive, datalen, &bytes);
+					idevice_connection_receive(conn, receive, datalen, &bytes, NULL);
 
 					if (bytes == 0)
 						break;
@@ -140,7 +145,7 @@ int main(int argc, char *argv[])
 				free(receive);
 			}
 		}
-		idevice_disconnect(conn);
+		idevice_disconnect(conn, NULL);
 	} else {
 		printf("ERROR: Could not start service com.apple.syslog_relay.\n");
 	}

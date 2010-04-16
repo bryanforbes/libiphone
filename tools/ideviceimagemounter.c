@@ -279,38 +279,48 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (IDEVICE_E_SUCCESS != idevice_new(&device, uuid)) {
+	GError *error = NULL;
+
+	device = idevice_new(uuid, &error);
+	if (error != NULL) {
 		printf("No device found, is it plugged in?\n");
+		g_error_free(error);
 		return -1;
 	}
 
-	if (LOCKDOWN_E_SUCCESS != lockdownd_client_new_with_handshake(device, &lckd, "ideviceimagemounter")) {
+	lckd = lockdownd_client_new_with_handshake(device, "ideviceimagemounter", &error);
+	if (error != NULL) {
 		printf("ERROR: could not connect to lockdown. Exiting.\n");
+		g_error_free(error);
 		goto leave;
 	}
 
-	lockdownd_start_service(lckd, "com.apple.mobile.mobile_image_mounter", &port);
+	port = lockdownd_start_service(lckd, "com.apple.mobile.mobile_image_mounter", NULL);
 
 	if (port == 0) {
 		printf("ERROR: Could not start mobile_image_mounter service!\n");
 		goto leave;
 	}
 
-	if (mobile_image_mounter_new(device, port, &mim) != MOBILE_IMAGE_MOUNTER_E_SUCCESS) {
+	mim = mobile_image_mounter_new(device, port, &error);
+	if (error != NULL) {
 		printf("ERROR: Could not connect to mobile_image_mounter!\n");
+		g_error_free(error);
 		goto leave;
 	}	
 
 	if (!list_mode) {
 		struct stat fst;
-		port = 0;
-		if ((lockdownd_start_service(lckd, "com.apple.afc", &port) !=
-			 LOCKDOWN_E_SUCCESS) || !port) {
+		port = lockdownd_start_service(lckd, "com.apple.afc", &error);
+		if (error != NULL || !port) {
 			fprintf(stderr, "Could not start com.apple.afc!\n");
+			g_error_free(error);
 			goto leave;
 		}
-		if (afc_client_new(device, port, &afc) != AFC_E_SUCCESS) {
+		afc = afc_client_new(device, port, &error);
+		if (error != NULL) {
 			fprintf(stderr, "Could not connect to AFC!\n");
+			g_error_free(error);
 			goto leave;
 		}
 		if (stat(image_path, &fst) != 0) {
@@ -323,10 +333,9 @@ int main(int argc, char **argv)
 		}
 	}
 
-	lockdownd_client_free(lckd);
+	lockdownd_client_free(lckd, NULL);
 	lckd = NULL;
 
-	mobile_image_mounter_error_t err;
 	plist_t result = NULL;
 
 	if (list_mode) {
@@ -334,9 +343,9 @@ int main(int argc, char **argv)
 		if (!imagetype) {
 			imagetype = strdup("Developer");
 		}
-		err = mobile_image_mounter_lookup_image(mim, imagetype, &result);
+		result = mobile_image_mounter_lookup_image(mim, imagetype, &error);
 		free(imagetype);
-		if (err == MOBILE_IMAGE_MOUNTER_E_SUCCESS) {
+		if (error == NULL) {
 			res = 0;
 			if (xml_mode) {
 				print_xml(result);
@@ -344,7 +353,8 @@ int main(int argc, char **argv)
 				plist_dict_to_string(result);
 			}
 		} else {
-			printf("Error: lookup_image returned %d\n", err);
+			printf("Error: lookup_image returned %d: %s\n", error->code, error->message);
+			g_error_free(error);
 		}
 	} else {
 		char sig[8192];
@@ -380,11 +390,15 @@ int main(int argc, char **argv)
 
 		printf("Copying '%s' --> '%s'\n", image_path, targetname);
 
-		char **strs = NULL;
-		if (afc_get_file_info(afc, PKG_PATH, &strs) != AFC_E_SUCCESS) {
-			if (afc_make_directory(afc, PKG_PATH) != AFC_E_SUCCESS) {
+		char **strs = afc_get_file_info(afc, PKG_PATH, &error);
+		if (error != NULL) {
+			GError *md_error = NULL;
+			afc_make_directory(afc, PKG_PATH, &md_error);
+			if (md_error != NULL) {
 				fprintf(stderr, "WARNING: Could not create directory '%s' on device!\n", PKG_PATH);
+				g_error_free(md_error);
 			}
+			g_error_free(error);
 		}
 		if (strs) {
 			int i = 0;
@@ -395,11 +409,11 @@ int main(int argc, char **argv)
 			free(strs);
 		}
 
-		uint64_t af = 0;
-		if ((afc_file_open(afc, targetname, AFC_FOPEN_WRONLY, &af) !=
-			 AFC_E_SUCCESS) || !af) {
+		uint64_t af = afc_file_open(afc, targetname, AFC_FOPEN_WRONLY, &error);
+		if ((error != NULL) || !af) {
 			fclose(f);
 			fprintf(stderr, "afc_file_open on '%s' failed!\n", targetname);
+			g_clear_error(&error);
 			goto leave;
 		}
 
@@ -410,10 +424,10 @@ int main(int argc, char **argv)
 			if (amount > 0) {
 				uint32_t written, total = 0;
 				while (total < amount) {
-					written = 0;
-					if (afc_file_write(afc, af, buf, amount, &written) !=
-						AFC_E_SUCCESS) {
+					written = afc_file_write(afc, af, buf, amount, &error);
+					if (error != NULL) {
 						fprintf(stderr, "AFC Write error!\n");
+						g_error_free(error);
 						break;
 					}
 					total += written;
@@ -421,7 +435,7 @@ int main(int argc, char **argv)
 				if (total != amount) {
 					fprintf(stderr, "Error: wrote only %d of %d\n", total,
 							amount);
-					afc_file_close(afc, af);
+					afc_file_close(afc, af, NULL);
 					fclose(f);
 					goto leave;
 				}
@@ -429,7 +443,7 @@ int main(int argc, char **argv)
 		}
 		while (amount > 0);
 
-		afc_file_close(afc, af);
+		afc_file_close(afc, af, NULL);
 		fclose(f);
 
 		printf("done.\n");
@@ -438,9 +452,9 @@ int main(int argc, char **argv)
 		if (!imagetype) {
 			imagetype = strdup("Developer");
 		}
-		err = mobile_image_mounter_mount_image(mim, mountname, sig, sig_length, imagetype, &result);
+		result = mobile_image_mounter_mount_image(mim, mountname, sig, sig_length, imagetype, &error);
 		free(imagetype);
-		if (err == MOBILE_IMAGE_MOUNTER_E_SUCCESS) {
+		if (error == NULL) {
 			if (result) {
 				plist_t node = plist_dict_get_item(result, "Status");
 				if (node) {
@@ -470,11 +484,11 @@ int main(int argc, char **argv)
 				}
 				node = plist_dict_get_item(result, "Error");
 				if (node) {
-					char *error = NULL;
-					plist_get_string_val(node, &error);
-					if (error) {
-						printf("Error: %s\n", error);
-						free(error);
+					char *error_str = NULL;
+					plist_get_string_val(node, &error_str);
+					if (error_str) {
+						printf("Error: %s\n", error_str);
+						free(error_str);
 					} else {
 						printf("unexpected result:\n");
 						if (xml_mode) {
@@ -493,7 +507,7 @@ int main(int argc, char **argv)
 				}
 			}
 		} else {
-			printf("Error: mount_image returned %d\n", err);
+			printf("Error: mount_image returned %d: %s\n", error->code, error->message);
 
 		}
 	}
@@ -503,16 +517,16 @@ int main(int argc, char **argv)
 	}
 
 	/* perform hangup command */
-	mobile_image_mounter_hangup(mim);
+	mobile_image_mounter_hangup(mim, NULL);
 	/* free client */
-	mobile_image_mounter_free(mim);
+	mobile_image_mounter_free(mim, NULL);
 
 leave:
 	if (afc) {
-		afc_client_free(afc);
+		afc_client_free(afc, NULL);
 	}
 	if (lckd) {
-		lockdownd_client_free(lckd);
+		lockdownd_client_free(lckd, NULL);
 	}
 	idevice_free(device);
 

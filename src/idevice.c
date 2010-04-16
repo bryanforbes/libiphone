@@ -29,6 +29,12 @@
 #include "idevice.h"
 #include "debug.h"
 
+GQuark
+idevice_error_quark (void)
+{
+  return g_quark_from_static_string ("idevice-error-quark");
+}
+
 static idevice_event_cb_t event_cb = NULL;
 
 static void usbmux_event_cb(const usbmuxd_event_t *event, void *user_data)
@@ -54,16 +60,18 @@ static void usbmux_event_cb(const usbmuxd_event_t *event, void *user_data)
  *
  * @return IDEVICE_E_SUCCESS on success or an error value when an error occured.
  */
-idevice_error_t idevice_event_subscribe(idevice_event_cb_t callback, void *user_data)
+void idevice_event_subscribe(idevice_event_cb_t callback, void *user_data, GError **error)
 {
 	event_cb = callback;
 	int res = usbmuxd_subscribe(usbmux_event_cb, user_data);
         if (res != 0) {
 		event_cb = NULL;
 		debug_info("Error %d when subscribing usbmux event callback!", res);
-		return IDEVICE_E_UNKNOWN_ERROR;
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_UNKNOWN_ERROR,
+			"Error %d when subscribing usbmux event callback",
+			res);
 	}
-	return IDEVICE_E_SUCCESS;
 }
 
 /**
@@ -72,15 +80,17 @@ idevice_error_t idevice_event_subscribe(idevice_event_cb_t callback, void *user_
  *
  * @return IDEVICE_E_SUCCESS on success or an error value when an error occured.
  */
-idevice_error_t idevice_event_unsubscribe()
+void idevice_event_unsubscribe(GError **error)
 {
 	event_cb = NULL;
 	int res = usbmuxd_unsubscribe();
 	if (res != 0) {
 		debug_info("Error %d when unsubscribing usbmux event callback!", res);
-		return IDEVICE_E_UNKNOWN_ERROR;
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_UNKNOWN_ERROR,
+			"Error %d when unsubscribing usbmux event callback",
+			res);
 	}
-	return IDEVICE_E_SUCCESS;
 }
 
 /**
@@ -92,7 +102,7 @@ idevice_error_t idevice_event_unsubscribe()
  *
  * @return IDEVICE_E_SUCCESS on success or an error value when an error occured.
  */
-idevice_error_t idevice_get_device_list(char ***devices, int *count)
+void idevice_get_device_list(char ***devices, int *count, GError **error)
 {
 	usbmuxd_device_info_t *dev_list;
 
@@ -101,7 +111,10 @@ idevice_error_t idevice_get_device_list(char ***devices, int *count)
 
 	if (usbmuxd_get_device_list(&dev_list) < 0) {
 		debug_info("ERROR: usbmuxd is not running!\n", __func__);
-		return IDEVICE_E_NO_DEVICE;
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_NO_DEVICE,
+			"ERROR: usbmuxd is not running");
+		return;
 	}
 
 	char **newlist = NULL;
@@ -119,7 +132,7 @@ idevice_error_t idevice_get_device_list(char ***devices, int *count)
 	newlist[newcount] = NULL;
 	*devices = newlist;
 
-	return IDEVICE_E_SUCCESS;
+	return;
 }
 
 /**
@@ -129,7 +142,7 @@ idevice_error_t idevice_get_device_list(char ***devices, int *count)
  *
  * @return Always returnes IDEVICE_E_SUCCESS.
  */
-idevice_error_t idevice_device_list_free(char **devices)
+void idevice_device_list_free(char **devices)
 {
 	if (devices) {
 		int i = 0;
@@ -138,7 +151,6 @@ idevice_error_t idevice_device_list_free(char **devices)
 		}
 		free(devices);
 	}
-	return IDEVICE_E_SUCCESS;
 }
 
 /**
@@ -154,7 +166,7 @@ idevice_error_t idevice_device_list_free(char **devices)
  *
  * @return IDEVICE_E_SUCCESS if ok, otherwise an error code.
  */
-idevice_error_t idevice_new(idevice_t * device, const char *uuid)
+idevice_t idevice_new(const char *uuid, GError **error)
 {
 	usbmuxd_device_info_t muxdev;
 	int res = usbmuxd_get_device_by_uuid(uuid, &muxdev);
@@ -163,12 +175,14 @@ idevice_error_t idevice_new(idevice_t * device, const char *uuid)
 		phone->uuid = strdup(muxdev.uuid);
 		phone->conn_type = CONNECTION_USBMUXD;
 		phone->conn_data = (void*)muxdev.handle;
-		*device = phone;
-		return IDEVICE_E_SUCCESS;
+		return phone;
 	}
 	/* other connection types could follow here */
 
-	return IDEVICE_E_NO_DEVICE;
+	g_set_error(error, IDEVICE_ERROR,
+		IDEVICE_E_NO_DEVICE,
+		"No device found");
+	return NULL;
 }
 
 /**
@@ -178,13 +192,9 @@ idevice_error_t idevice_new(idevice_t * device, const char *uuid)
  * 
  * @param device idevice_t to free.
  */
-idevice_error_t idevice_free(idevice_t device)
+void idevice_free(idevice_t device)
 {
-	if (!device)
-		return IDEVICE_E_INVALID_ARG;
-	idevice_error_t ret = IDEVICE_E_UNKNOWN_ERROR;
-
-	ret = IDEVICE_E_SUCCESS;
+	g_assert(device != NULL);
 
 	free(device->uuid);
 
@@ -195,7 +205,6 @@ idevice_error_t idevice_free(idevice_t device)
 		free(device->conn_data);
 	}
 	free(device);
-	return ret;
 }
 
 /**
@@ -208,29 +217,34 @@ idevice_error_t idevice_free(idevice_t device)
  *
  * @return IDEVICE_E_SUCCESS if ok, otherwise an error code.
  */
-idevice_error_t idevice_connect(idevice_t device, uint16_t port, idevice_connection_t *connection)
+idevice_connection_t idevice_connect(idevice_t device, uint16_t port, GError **error)
 {
-	if (!device) {
-		return IDEVICE_E_INVALID_ARG;
-	}
+	g_assert(device != NULL);
 
 	if (device->conn_type == CONNECTION_USBMUXD) {
 		int sfd = usbmuxd_connect((uint32_t)(device->conn_data), port);
 		if (sfd < 0) {
 			debug_info("ERROR: Connecting to usbmuxd failed: %d (%s)", sfd, strerror(-sfd));
-			return IDEVICE_E_UNKNOWN_ERROR;
+			g_set_error(error, IDEVICE_ERROR,
+				IDEVICE_E_UNKNOWN_ERROR,
+				"Connecting to usbmuxd failed %d (%s)",
+				sfd, g_strerror(-sfd));
+			return NULL;
 		}
 		idevice_connection_t new_connection = (idevice_connection_t)malloc(sizeof(struct idevice_connection_private));
 		new_connection->type = CONNECTION_USBMUXD;
 		new_connection->data = (void*)sfd;
 		new_connection->ssl_data = NULL;
-		*connection = new_connection;
-		return IDEVICE_E_SUCCESS;
+		return new_connection;
 	} else {
 		debug_info("Unknown connection type %d", device->conn_type);
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_UNKNOWN_ERROR,
+			"Unknown connection type %d",
+			device->conn_type);
 	}
 
-	return IDEVICE_E_UNKNOWN_ERROR;
+	return NULL;
 }
 
 /**
@@ -240,47 +254,54 @@ idevice_error_t idevice_connect(idevice_t device, uint16_t port, idevice_connect
  *
  * @return IDEVICE_E_SUCCESS if ok, otherwise an error code.
  */
-idevice_error_t idevice_disconnect(idevice_connection_t connection)
+void idevice_disconnect(idevice_connection_t connection, GError **error)
 {
-	if (!connection) {
-		return IDEVICE_E_INVALID_ARG;
-	}
+	g_assert(connection != NULL);
+
 	/* shut down ssl if enabled */
 	if (connection->ssl_data) {
 		idevice_connection_disable_ssl(connection);
 	}
-	idevice_error_t result = IDEVICE_E_UNKNOWN_ERROR;
 	if (connection->type == CONNECTION_USBMUXD) {
 		usbmuxd_disconnect((int)(connection->data));
-		result = IDEVICE_E_SUCCESS;
 	} else {
 		debug_info("Unknown connection type %d", connection->type);
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_UNKNOWN_ERROR,
+			"Unknown connection type %d",
+			connection->type);
 	}
 	free(connection);
-	return result;
 }
 
 /**
  * Internally used function to send raw data over the given connection.
  */
-static idevice_error_t internal_connection_send(idevice_connection_t connection, const char *data, uint32_t len, uint32_t *sent_bytes)
+static uint32_t internal_connection_send(idevice_connection_t connection, const char *data, uint32_t len, GError **error)
 {
-	if (!connection || !data) {
-		return IDEVICE_E_INVALID_ARG;
-	}
+	g_assert(connection != NULL && data != NULL);
+
+	uint32_t sent_bytes = 0;
 
 	if (connection->type == CONNECTION_USBMUXD) {
-		int res = usbmuxd_send((int)(connection->data), data, len, sent_bytes);
+		int res = usbmuxd_send((int)(connection->data), data, len, &sent_bytes);
 		if (res < 0) {
 			debug_info("ERROR: usbmuxd_send returned %d (%s)", res, strerror(-res));
-			return IDEVICE_E_UNKNOWN_ERROR;
+			g_set_error(error, IDEVICE_ERROR,
+				IDEVICE_E_UNKNOWN_ERROR,
+				"usbmuxd_send returned %d (%s)",
+				res, g_strerror(-res));
+			return 0;
 		}
-		return IDEVICE_E_SUCCESS;
+		return sent_bytes;
 	} else {
 		debug_info("Unknown connection type %d", connection->type);
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_UNKNOWN_ERROR,
+			"Unknown connection type %d",
+			connection->type);
+		return 0;
 	}
-	return IDEVICE_E_UNKNOWN_ERROR;
-
 }
 
 /**
@@ -294,45 +315,48 @@ static idevice_error_t internal_connection_send(idevice_connection_t connection,
  *
  * @return IDEVICE_E_SUCCESS if ok, otherwise an error code.
  */
-idevice_error_t idevice_connection_send(idevice_connection_t connection, const char *data, uint32_t len, uint32_t *sent_bytes)
+uint32_t idevice_connection_send(idevice_connection_t connection, const char *data, uint32_t len, GError **error)
 {
-	if (!connection || !data || (connection->ssl_data && !connection->ssl_data->session)) {
-		return IDEVICE_E_INVALID_ARG;
-	}
+	g_assert(connection != NULL && data != NULL);
+	g_assert(connection->ssl_data == NULL || connection->ssl_data->session != NULL);
 
 	if (connection->ssl_data) {
 		ssize_t sent = gnutls_record_send(connection->ssl_data->session, (void*)data, (size_t)len);
 		if ((uint32_t)sent == (uint32_t)len) {
-			*sent_bytes = sent;
-			return IDEVICE_E_SUCCESS;
+			return sent;
 		}
-		*sent_bytes = 0;
-		return IDEVICE_E_SSL_ERROR;
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_SSL_ERROR,
+			"SSL Error");
+		return 0;
 	}
-	return internal_connection_send(connection, data, len, sent_bytes);
+	return internal_connection_send(connection, data, len, error);
 }
 
 /**
  * Internally used function for receiving raw data over the given connection
  * using a timeout.
  */
-static idevice_error_t internal_connection_receive_timeout(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, unsigned int timeout)
+static void internal_connection_receive_timeout(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, unsigned int timeout, GError **error)
 {
-	if (!connection) {
-		return IDEVICE_E_INVALID_ARG;
-	}
+	g_assert(connection != NULL);
 
 	if (connection->type == CONNECTION_USBMUXD) {
 		int res = usbmuxd_recv_timeout((int)(connection->data), data, len, recv_bytes, timeout);
 		if (res < 0) {
 			debug_info("ERROR: usbmuxd_recv_timeout returned %d (%s)", res, strerror(-res));
-			return IDEVICE_E_UNKNOWN_ERROR;
+			g_set_error(error, IDEVICE_ERROR,
+				IDEVICE_E_UNKNOWN_ERROR,
+				"usbmuxd_recv_timeout returned %d (%s)",
+				res, g_strerror(-res));
 		}
-		return IDEVICE_E_SUCCESS;
 	} else {
 		debug_info("Unknown connection type %d", connection->type);
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_UNKNOWN_ERROR,
+			"Unknown connection type %d",
+			connection->type);
 	}
-	return IDEVICE_E_UNKNOWN_ERROR;
 }
 
 /**
@@ -350,45 +374,48 @@ static idevice_error_t internal_connection_receive_timeout(idevice_connection_t 
  *
  * @return IDEVICE_E_SUCCESS if ok, otherwise an error code.
  */
-idevice_error_t idevice_connection_receive_timeout(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, unsigned int timeout)
+void idevice_connection_receive_timeout(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, unsigned int timeout, GError **error)
 {
-	if (!connection || (connection->ssl_data && !connection->ssl_data->session)) {
-		return IDEVICE_E_INVALID_ARG;
-	}
+	g_assert(connection != NULL && (connection->ssl_data == NULL || connection->ssl_data->session != NULL));
 
 	if (connection->ssl_data) {
 		ssize_t received = gnutls_record_recv(connection->ssl_data->session, (void*)data, (size_t)len);
 		if (received > 0) {
 			*recv_bytes = received;
-			return IDEVICE_E_SUCCESS;
+			return;
 		}
 		*recv_bytes = 0;
-		return IDEVICE_E_SSL_ERROR;
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_SSL_ERROR,
+			"SSL Error");
+		return;
 	}
-	return internal_connection_receive_timeout(connection, data, len, recv_bytes, timeout);
+	internal_connection_receive_timeout(connection, data, len, recv_bytes, timeout, error);
 }
 
 /**
  * Internally used function for receiving raw data over the given connection.
  */
-static idevice_error_t internal_connection_receive(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes)
+static void internal_connection_receive(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, GError **error)
 {
-	if (!connection) {
-		return IDEVICE_E_INVALID_ARG;
-	}
+	g_assert(connection != NULL);
 
 	if (connection->type == CONNECTION_USBMUXD) {
 		int res = usbmuxd_recv((int)(connection->data), data, len, recv_bytes);
 		if (res < 0) {
 			debug_info("ERROR: usbmuxd_recv returned %d (%s)", res, strerror(-res));
-			return IDEVICE_E_UNKNOWN_ERROR;
+			g_set_error(error, IDEVICE_ERROR,
+				IDEVICE_E_UNKNOWN_ERROR,
+				"usbmuxd_recv_timeout returned %d (%s)",
+				res, g_strerror(-res));
 		}
-
-		return IDEVICE_E_SUCCESS;
 	} else {
 		debug_info("Unknown connection type %d", connection->type);
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_UNKNOWN_ERROR,
+			"Unknown connection type %d",
+			connection->type);
 	}
-	return IDEVICE_E_UNKNOWN_ERROR;
 }
 
 /**
@@ -404,51 +431,52 @@ static idevice_error_t internal_connection_receive(idevice_connection_t connecti
  *
  * @return IDEVICE_E_SUCCESS if ok, otherwise an error code.
  */
-idevice_error_t idevice_connection_receive(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes)
+void idevice_connection_receive(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, GError **error)
 {
-	if (!connection || (connection->ssl_data && !connection->ssl_data->session)) {
-		return IDEVICE_E_INVALID_ARG;
-	}
+	g_assert(connection != NULL && (connection->ssl_data == NULL || connection->ssl_data->session != NULL));
 
 	if (connection->ssl_data) {
 		ssize_t received = gnutls_record_recv(connection->ssl_data->session, (void*)data, (size_t)len);
 		if (received > 0) {
 			*recv_bytes = received;
-			return IDEVICE_E_SUCCESS;
+			return;
 		}
 		*recv_bytes = 0;
-		return IDEVICE_E_SSL_ERROR;
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_SSL_ERROR,
+			"SSL Error");
+		return;
 	}
-	return internal_connection_receive(connection, data, len, recv_bytes);
+	internal_connection_receive(connection, data, len, recv_bytes, error);
 }
 
 /**
  * Gets the handle of the device. Depends on the connection type.
  */
-idevice_error_t idevice_get_handle(idevice_t device, uint32_t *handle)
+uint32_t idevice_get_handle(idevice_t device, GError **error)
 {
-	if (!device)
-		return IDEVICE_E_INVALID_ARG;
+	g_assert(device != NULL);
 
 	if (device->conn_type == CONNECTION_USBMUXD) {
-		*handle = (uint32_t)device->conn_data;
-		return IDEVICE_E_SUCCESS;
+		return (uint32_t)device->conn_data;
 	} else {
 		debug_info("Unknown connection type %d", device->conn_type);
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_UNKNOWN_ERROR,
+			"Unknown connection type %d",
+			device->conn_type);
 	}
-	return IDEVICE_E_UNKNOWN_ERROR;
+	return 0;
 }
 
 /**
  * Gets the unique id for the device.
  */
-idevice_error_t idevice_get_uuid(idevice_t device, char **uuid)
+char* idevice_get_uuid(idevice_t device, GError **error)
 {
-	if (!device)
-		return IDEVICE_E_INVALID_ARG;
+	g_assert(device != NULL);
 
-	*uuid = strdup(device->uuid);
-	return IDEVICE_E_SUCCESS;
+	return strdup(device->uuid);
 }
 
 /**
@@ -462,6 +490,7 @@ static ssize_t internal_ssl_read(gnutls_transport_ptr_t transport, char *buffer,
 	idevice_error_t res;
 	idevice_connection_t connection = (idevice_connection_t)transport;
 	char *recv_buffer;
+	GError *error = NULL;
 
 	debug_info("pre-read client wants %zi bytes", length);
 
@@ -469,8 +498,11 @@ static ssize_t internal_ssl_read(gnutls_transport_ptr_t transport, char *buffer,
 
 	/* repeat until we have the full data or an error occurs */
 	do {
-		if ((res = internal_connection_receive(connection, recv_buffer, this_len, (uint32_t*)&bytes)) != IDEVICE_E_SUCCESS) {
+		internal_connection_receive(connection, recv_buffer, this_len, (uint32_t*)&bytes, &error);
+		if (error != NULL) {
+			res = error->code;
 			debug_info("ERROR: idevice_connection_receive returned %d", res);
+			g_error_free(error);
 			return res;
 		}
 		debug_info("post-read we got %i bytes", bytes);
@@ -502,9 +534,11 @@ static ssize_t internal_ssl_read(gnutls_transport_ptr_t transport, char *buffer,
 static ssize_t internal_ssl_write(gnutls_transport_ptr_t transport, char *buffer, size_t length)
 {
 	uint32_t bytes = 0;
+	GError *error = NULL;
 	idevice_connection_t connection = (idevice_connection_t)transport;
 	debug_info("pre-send length = %zi", length);
-	internal_connection_send(connection, buffer, length, &bytes);
+	bytes = internal_connection_send(connection, buffer, length, &error);
+	g_clear_error(&error);
 	debug_info("post-send sent %i bytes", bytes);
 	return bytes;
 }
@@ -534,12 +568,10 @@ static void internal_ssl_cleanup(ssl_data_t ssl_data)
  *     is NULL or connection->ssl_data is non-NULL, or IDEVICE_E_SSL_ERROR when
  *     SSL initialization, setup, or handshake fails.
  */
-idevice_error_t idevice_connection_enable_ssl(idevice_connection_t connection)
+void idevice_connection_enable_ssl(idevice_connection_t connection, GError **error)
 {
-	if (!connection || connection->ssl_data)
-		return IDEVICE_E_INVALID_ARG;
+	g_assert(connection != NULL && connection->ssl_data == NULL);
 
-	idevice_error_t ret = IDEVICE_E_SSL_ERROR;
 	uint32_t return_me = 0;
 
 	ssl_data_t ssl_data_loc = (ssl_data_t)malloc(sizeof(struct ssl_data_private));
@@ -584,12 +616,14 @@ idevice_error_t idevice_connection_enable_ssl(idevice_connection_t connection)
 		debug_info("GnuTLS reported something wrong.");
 		gnutls_perror(return_me);
 		debug_info("oh.. errno says %s", strerror(errno));
+		g_set_error(error, IDEVICE_ERROR,
+			IDEVICE_E_SSL_ERROR,
+			"GnuTLS reported something wrong: %s",
+			g_strerror(errno));
 	} else {
 		connection->ssl_data = ssl_data_loc;
-		ret = IDEVICE_E_SUCCESS;
 		debug_info("SSL mode enabled");
 	}
-	return ret;
 }
 
 /**
@@ -601,13 +635,12 @@ idevice_error_t idevice_connection_enable_ssl(idevice_connection_t connection)
  *     is NULL. This function also returns IDEVICE_E_SUCCESS when SSL is not
  *     enabled and does no further error checking on cleanup.
  */
-idevice_error_t idevice_connection_disable_ssl(idevice_connection_t connection)
+void idevice_connection_disable_ssl(idevice_connection_t connection)
 {
-	if (!connection)
-		return IDEVICE_E_INVALID_ARG;
+	g_assert(connection != NULL);
 	if (!connection->ssl_data) {
 		/* ignore if ssl is not enabled */ 
-		return IDEVICE_E_SUCCESS;
+		return;
 	}
 
 	if (connection->ssl_data->session) {
@@ -618,7 +651,5 @@ idevice_error_t idevice_connection_disable_ssl(idevice_connection_t connection)
 	connection->ssl_data = NULL;
 
 	debug_info("SSL mode disabled");
-
-	return IDEVICE_E_SUCCESS;
 }
 

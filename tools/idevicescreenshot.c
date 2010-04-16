@@ -68,35 +68,44 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (IDEVICE_E_SUCCESS != idevice_new(&device, uuid)) {
+	GError *error = NULL;
+
+	device = idevice_new(uuid, &error);
+	if (error != NULL) {
 		printf("No device found, is it plugged in?\n");
 		if (uuid) {
 			free(uuid);
 		}
+		g_error_free(error);
 		return -1;
 	}
 	if (uuid) {
 		free(uuid);
 	}
 
-	if (LOCKDOWN_E_SUCCESS != lockdownd_client_new_with_handshake(device, &lckd, NULL)) {
+	lckd = lockdownd_client_new_with_handshake(device, NULL, &error);
+	if (error != NULL) {
 		idevice_free(device);
 		printf("Exiting.\n");
+		g_error_free(error);
 		return -1;
 	}
 
-	lockdownd_start_service(lckd, "com.apple.mobile.screenshotr", &port);
-	lockdownd_client_free(lckd);
+	port = lockdownd_start_service(lckd, "com.apple.mobile.screenshotr", NULL);
+	lockdownd_client_free(lckd, NULL);
 	if (port > 0) {
-		if (screenshotr_client_new(device, port, &shotr) != SCREENSHOTR_E_SUCCESS) {
+		shotr = screenshotr_client_new(device, port, &error);
+		if (error != NULL) {
 			printf("Could not connect to screenshotr!\n");
+			g_error_free(error);
 		} else {
 			char *imgdata = NULL;
 			char filename[36];
 			uint64_t imgsize = 0;
 			time_t now = time(NULL);
 			strftime(filename, 36, "screenshot-%Y-%m-%d-%H-%M-%S.tiff", gmtime(&now));
-			if (screenshotr_take_screenshot(shotr, &imgdata, &imgsize) == SCREENSHOTR_E_SUCCESS) {
+			screenshotr_take_screenshot(shotr, &imgdata, &imgsize, &error);
+			if (error == NULL) {
 				FILE *f = fopen(filename, "w");
 				if (f) {
 					if (fwrite(imgdata, 1, (size_t)imgsize, f) == (size_t)imgsize) {
@@ -112,7 +121,7 @@ int main(int argc, char **argv)
 			} else {
 				printf("Could not get screenshot!\n");
 			}
-			screenshotr_client_free(shotr);
+			screenshotr_client_free(shotr, NULL);
 		}
 	} else {
 		printf("Could not start screenshotr service! Remember that you have to mount the Developer disk image on your device if you want to use the screenshotr service.\n");

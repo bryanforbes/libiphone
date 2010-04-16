@@ -30,6 +30,12 @@
 #define MBACKUP_VERSION_INT1 100
 #define MBACKUP_VERSION_INT2 0
 
+GQuark
+mobilebackup_client_error_quark (void)
+{
+  return g_quark_from_static_string ("mobilebackup-client-error-quark");
+}
+
 /**
  * Convert an device_link_service_error_t value to an mobilebackup_error_t value.
  * Used internally to get correct error codes when using device_link_service stuff.
@@ -70,32 +76,30 @@ static mobilebackup_error_t mobilebackup_error(device_link_service_error_t err)
  *     or more parameters are invalid, or DEVICE_LINK_SERVICE_E_BAD_VERSION if
  *     the mobilebackup version on the device is newer.
  */
-mobilebackup_error_t mobilebackup_client_new(idevice_t device, uint16_t port,
-						   mobilebackup_client_t * client)
+mobilebackup_client_t mobilebackup_client_new(idevice_t device, uint16_t port, GError **error)
 {
-	if (!device || port == 0 || !client || *client)
-		return MOBILEBACKUP_E_INVALID_ARG;
+	g_assert(device != NULL && port > 0);
 
-	device_link_service_client_t dlclient = NULL;
-	mobilebackup_error_t ret = mobilebackup_error(device_link_service_client_new(device, port, &dlclient));
-	if (ret != MOBILEBACKUP_E_SUCCESS) {
-		return ret;
+	GError *tmp_error = NULL;
+	device_link_service_client_t dlclient = device_link_service_client_new(device, port, &tmp_error);
+	if (tmp_error != NULL) {
+		g_propagate_error(error, tmp_error);
+		return NULL;
 	}
 
 	mobilebackup_client_t client_loc = (mobilebackup_client_t) malloc(sizeof(struct mobilebackup_client_private));
 	client_loc->parent = dlclient;
 
 	/* perform handshake */
-	ret = mobilebackup_error(device_link_service_version_exchange(dlclient, MBACKUP_VERSION_INT1, MBACKUP_VERSION_INT2));
-	if (ret != MOBILEBACKUP_E_SUCCESS) {
-		debug_info("version exchange failed, error %d", ret);
-		mobilebackup_client_free(client_loc);
-		return ret;
+	device_link_service_version_exchange(dlclient, MBACKUP_VERSION_INT1, MBACKUP_VERSION_INT2, &tmp_error);
+	if (tmp_error != NULL) {
+		debug_info("version exchange failed, error %d, reason %s", tmp_error->code, tmp_error->message);
+		mobilebackup_client_free(client_loc, NULL);
+		g_propagate_error(error, tmp_error);
+		return NULL;
 	}
 
-	*client = client_loc;
-
-	return ret;
+	return client_loc;
 }
 
 /**
@@ -107,14 +111,14 @@ mobilebackup_error_t mobilebackup_client_new(idevice_t device, uint16_t port,
  * @return MOBILEBACKUP_E_SUCCESS on success, or MOBILEBACKUP_E_INVALID_ARG
  *     if client is NULL.
  */
-mobilebackup_error_t mobilebackup_client_free(mobilebackup_client_t client)
+void mobilebackup_client_free(mobilebackup_client_t client, GError **error)
 {
-	if (!client)
-		return MOBILEBACKUP_E_INVALID_ARG;
-	device_link_service_disconnect(client->parent);
-	mobilebackup_error_t err = mobilebackup_error(device_link_service_client_free(client->parent));
+	g_assert(client != NULL);
+
+	device_link_service_disconnect(client->parent, NULL);
+
+	device_link_service_client_free(client->parent, error);
 	free(client);
-	return err;
 }
 
 /**
@@ -125,12 +129,10 @@ mobilebackup_error_t mobilebackup_client_free(mobilebackup_client_t client)
  *
  * @return an error code
  */
-mobilebackup_error_t mobilebackup_receive(mobilebackup_client_t client, plist_t * plist)
+plist_t mobilebackup_receive(mobilebackup_client_t client, GError **error)
 {
-	if (!client)
-		return MOBILEBACKUP_E_INVALID_ARG;
-	mobilebackup_error_t ret = mobilebackup_error(device_link_service_receive(client->parent, plist));
-	return ret;
+	g_assert(client != NULL);
+	return device_link_service_receive(client->parent, error);
 }
 
 /**
@@ -144,11 +146,10 @@ mobilebackup_error_t mobilebackup_receive(mobilebackup_client_t client, plist_t 
  *
  * @return an error code
  */
-mobilebackup_error_t mobilebackup_send(mobilebackup_client_t client, plist_t plist)
+void mobilebackup_send(mobilebackup_client_t client, plist_t plist, GError **error)
 {
-	if (!client || !plist)
-		return MOBILEBACKUP_E_INVALID_ARG;
-	return mobilebackup_error(device_link_service_send(client->parent, plist));
+	g_assert(client != NULL && plist != NULL);
+	device_link_service_send(client->parent, plist, error);
 }
 
 /**
@@ -168,15 +169,18 @@ mobilebackup_error_t mobilebackup_send(mobilebackup_client_t client, plist_t pli
  *    backup_manifest is not of type PLIST_DICT, MOBILEBACKUP_E_MUX_ERROR
  *    if a communication error occurs, MOBILEBACKUP_E_REPLY_NOT_OK
  */
-mobilebackup_error_t mobilebackup_request_backup(mobilebackup_client_t client, plist_t backup_manifest, const char *base_path, const char *proto_version)
+void mobilebackup_request_backup(mobilebackup_client_t client, plist_t backup_manifest, const char *base_path, const char *proto_version, GError **error)
 {
-	if (!client || !client->parent || !base_path || !proto_version)
-		return MOBILEBACKUP_E_INVALID_ARG;
+	g_assert(client != NULL && client->parent != NULL && base_path != NULL && proto_version != NULL);
 
-	if (backup_manifest && (plist_get_node_type(backup_manifest) != PLIST_DICT))
-		return MOBILEBACKUP_E_PLIST_ERROR;
+	if (backup_manifest && (plist_get_node_type(backup_manifest) != PLIST_DICT)) {
+		g_set_error(error, MOBILEBACKUP_CLIENT_ERROR,
+			MOBILEBACKUP_E_PLIST_ERROR,
+			"Backup manifest must be a dict");
+		return;
+	}
 
-	mobilebackup_error_t err;
+	GError *tmp_error = NULL;
 
 	/* construct request plist */
 	plist_t dict = plist_new_dict();
@@ -187,25 +191,29 @@ mobilebackup_error_t mobilebackup_request_backup(mobilebackup_client_t client, p
 	plist_dict_insert_item(dict, "BackupProtocolVersion", plist_new_string(proto_version));
 
 	/* send it as DLMessageProcessMessage */
-	err = mobilebackup_error(device_link_service_send_process_message(client->parent, dict));
+	device_link_service_send_process_message(client->parent, dict, &tmp_error);
 	plist_free(dict);
 	dict = NULL;
-	if (err != MOBILEBACKUP_E_SUCCESS) {
-		debug_info("ERROR: Could not send backup request message (%d)!", err);
+	if (tmp_error != NULL) {
+		debug_info("ERROR: Could not send backup request message (%d: %s)!", tmp_error->code, tmp_error->message);
+		g_propagate_error(error, tmp_error);
 		goto leave;
 	}
 
 	/* now receive and hopefully get a BackupMessageBackupReplyOK */
-	err = mobilebackup_error(device_link_service_receive_process_message(client->parent, &dict));
-	if (err != MOBILEBACKUP_E_SUCCESS) {
-		debug_info("ERROR: Could not receive BackupReplyOK message (%d)!", err);
+	dict = device_link_service_receive_process_message(client->parent, &tmp_error);
+	if (tmp_error != NULL) {
+		debug_info("ERROR: Could not receive BackupReplyOK message (%d: %s)!", tmp_error->code, tmp_error->message);
+		g_propagate_error(error, tmp_error);
 		goto leave;
 	}
 
 	plist_t node = plist_dict_get_item(dict, "BackupMessageTypeKey");
 	if (!node) {
 		debug_info("ERROR: BackupMessageTypeKey not found in BackupReplyOK message!");
-		err = MOBILEBACKUP_E_PLIST_ERROR;
+		g_set_error(error, MOBILEBACKUP_CLIENT_ERROR,
+			MOBILEBACKUP_E_PLIST_ERROR,
+			"BackupMessageTypeKey not found in BackupReplyOK message");
 		goto leave;
 	}
 
@@ -213,7 +221,9 @@ mobilebackup_error_t mobilebackup_request_backup(mobilebackup_client_t client, p
 	plist_get_string_val(node, &str);
 	if (!str || (strcmp(str, "BackupMessageBackupReplyOK") != 0)) {
 		debug_info("ERROR: BackupMessageTypeKey value does not match 'BackupMessageBackupReplyOK'");
-		err = MOBILEBACKUP_E_REPLY_NOT_OK;
+		g_set_error(error, MOBILEBACKUP_CLIENT_ERROR,
+			MOBILEBACKUP_E_REPLY_NOT_OK,
+			"BackupMessageTypeKey value does not match 'BackupMessageBackupReplyOK'");
 		if (str)
 			free(str);
 		goto leave;
@@ -221,29 +231,34 @@ mobilebackup_error_t mobilebackup_request_backup(mobilebackup_client_t client, p
 	free(str);
 	str = NULL;
 
+	int bad_version = 0;
 	node = plist_dict_get_item(dict, "BackupProtocolVersion");
 	if (node) {
 		plist_get_string_val(node, &str);
 		if (str) {
 			if (strcmp(str, proto_version) != 0) {
-				err = MOBILEBACKUP_E_BAD_VERSION;
+				bad_version = 1;
 			}
 			free(str);
 		}
 	}
-	if (err != MOBILEBACKUP_E_SUCCESS)
+	if (bad_version == 1) {
+		g_set_error(error, MOBILEBACKUP_CLIENT_ERROR,
+			MOBILEBACKUP_E_BAD_VERSION,
+			"Bad version");
 		goto leave;
+	}
 
 	/* BackupMessageBackupReplyOK received, send it back */
-	err = mobilebackup_error(device_link_service_send_process_message(client->parent, dict));
-	if (err != MOBILEBACKUP_E_SUCCESS) {
-		debug_info("ERROR: Could not send BackupReplyOK ACK (%d)", err);
+	device_link_service_send_process_message(client->parent, dict, &tmp_error);
+	if (tmp_error != NULL) {
+		debug_info("ERROR: Could not send BackupReplyOK ACK (%d: %s)", tmp_error->code, tmp_error->message);
+		g_propagate_error(error, tmp_error);
 	}
 
 leave:
 	if (dict)
 		plist_free(dict);
-	return err;
 }
 
 /**
@@ -255,22 +270,17 @@ leave:
  *    client is invalid, or MOBILEBACKUP_E_MUX_ERROR if a communication error
  *    occurs.
  */
-mobilebackup_error_t mobilebackup_send_backup_file_received(mobilebackup_client_t client)
+void mobilebackup_send_backup_file_received(mobilebackup_client_t client, GError **error)
 {
-	if (!client || !client->parent)
-		return MOBILEBACKUP_E_INVALID_ARG;
-
-	mobilebackup_error_t err;
+	g_assert(client != NULL);
 
 	/* construct ACK plist */
 	plist_t dict = plist_new_dict();
 	plist_dict_insert_item(dict, "BackupMessageTypeKey", plist_new_string("kBackupMessageBackupFileReceived"));
 
 	/* send it as DLMessageProcessMessage */
-	err = mobilebackup_error(device_link_service_send_process_message(client->parent, dict));
+	device_link_service_send_process_message(client->parent, dict, error);
 	plist_free(dict);
-
-	return err;
 }
 
 /**
@@ -283,12 +293,9 @@ mobilebackup_error_t mobilebackup_send_backup_file_received(mobilebackup_client_
  *    one of the parameters is invalid, or MOBILEBACKUP_E_MUX_ERROR if a
  *    communication error occurs.
  */
-mobilebackup_error_t mobilebackup_send_error(mobilebackup_client_t client, const char *reason)
+void mobilebackup_send_error(mobilebackup_client_t client, const char *reason, GError **error)
 {
-	if (!client || !client->parent || !reason)
-		return MOBILEBACKUP_E_INVALID_ARG;
-
-	mobilebackup_error_t err;
+	g_assert(client != NULL && client->parent != NULL && reason != NULL);
 
 	/* construct error plist */
 	plist_t dict = plist_new_dict();
@@ -296,8 +303,6 @@ mobilebackup_error_t mobilebackup_send_error(mobilebackup_client_t client, const
 	plist_dict_insert_item(dict, "BackupErrorReasonKey", plist_new_string(reason));
 
 	/* send it as DLMessageProcessMessage */
-	err = mobilebackup_error(device_link_service_send_process_message(client->parent, dict));
+	device_link_service_send_process_message(client->parent, dict, error);
 	plist_free(dict);
-
-	return err;
 }

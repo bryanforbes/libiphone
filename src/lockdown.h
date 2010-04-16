@@ -35,8 +35,8 @@ struct lockdownd_client_private {
 	char *label;
 };
 
-lockdownd_error_t lockdownd_get_device_public_key(lockdownd_client_t client, gnutls_datum_t * public_key);
-lockdownd_error_t lockdownd_gen_pair_cert(gnutls_datum_t public_key, gnutls_datum_t * device_cert,
-									   gnutls_datum_t * host_cert, gnutls_datum_t * root_cert);
+gnutls_datum_t lockdownd_get_device_public_key(lockdownd_client_t client, GError **error);
+void lockdownd_gen_pair_cert(gnutls_datum_t public_key, gnutls_datum_t * device_cert,
+									   gnutls_datum_t * host_cert, gnutls_datum_t * root_cert, GError **error);
 
 #endif

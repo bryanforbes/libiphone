@@ -26,6 +26,12 @@
 #include "idevice.h"
 #include "debug.h"
 
+GQuark
+property_list_service_error_quark (void)
+{
+  return g_quark_from_static_string ("property-list-service-error-quark");
+}
+
 /**
  * Convert an idevice_error_t value to an property_list_service_error_t value.
  * Used internally to get correct error codes.
@@ -63,24 +69,27 @@ static property_list_service_error_t idevice_to_property_list_service_error(idev
  *     PROPERTY_LIST_SERVICE_E_INVALID_ARG when one of the arguments is invalid,
  *     or PROPERTY_LIST_SERVICE_E_MUX_ERROR when connecting to the device failed.
  */
-property_list_service_error_t property_list_service_client_new(idevice_t device, uint16_t port, property_list_service_client_t *client)
+property_list_service_client_t property_list_service_client_new(idevice_t device, uint16_t port, GError **error)
 {
-	if (!device || port == 0 || !client || *client)
-		return PROPERTY_LIST_SERVICE_E_INVALID_ARG;
+	GError *idevice_error = NULL;
+
+	g_assert(device != NULL && port > 0);
 
 	/* Attempt connection */
-	idevice_connection_t connection = NULL;
-	if (idevice_connect(device, port, &connection) != IDEVICE_E_SUCCESS) {
-		return PROPERTY_LIST_SERVICE_E_MUX_ERROR;
+	idevice_connection_t connection = idevice_connect(device, port, &idevice_error);
+	if (connection == NULL) {
+		g_set_error_literal(error, PROPERTY_LIST_SERVICE_ERROR,
+			PROPERTY_LIST_SERVICE_E_MUX_ERROR,
+			idevice_error->message);
+		g_error_free(idevice_error);
+		return NULL;
 	}
 
 	/* create client object */
 	property_list_service_client_t client_loc = (property_list_service_client_t)malloc(sizeof(struct property_list_service_client_private));
 	client_loc->connection = connection;
 
-	*client = client_loc;
-
-	return PROPERTY_LIST_SERVICE_E_SUCCESS;
+	return client_loc;
 }
 
 /**
@@ -92,14 +101,17 @@ property_list_service_error_t property_list_service_client_new(idevice_t device,
  *     PROPERTY_LIST_SERVICE_E_INVALID_ARG when client is invalid, or a
  *     PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR when another error occured.
  */
-property_list_service_error_t property_list_service_client_free(property_list_service_client_t client)
+void property_list_service_client_free(property_list_service_client_t client, GError **error)
 {
-	if (!client)
-		return PROPERTY_LIST_SERVICE_E_INVALID_ARG;
+	g_assert(client != NULL);
 
-	property_list_service_error_t err = idevice_to_property_list_service_error(idevice_disconnect(client->connection));
+	GError *idevice_error = NULL;
+	idevice_disconnect(client->connection, &idevice_error);
+	if (idevice_error != NULL) {
+		g_propagate_error(error, idevice_error);
+	}
+
 	free(client);
-	return err;
 }
 
 /**
@@ -116,17 +128,15 @@ property_list_service_error_t property_list_service_client_free(property_list_se
  *      plist, or PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR when an unspecified
  *      error occurs.
  */
-static property_list_service_error_t internal_plist_send(property_list_service_client_t client, plist_t plist, int binary)
+static void internal_plist_send(property_list_service_client_t client, plist_t plist, int binary, GError **error)
 {
-	property_list_service_error_t res = PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR;
 	char *content = NULL;
 	uint32_t length = 0;
 	uint32_t nlen = 0;
 	int bytes = 0;
+	GError *idevice_error = NULL;
 
-	if (!client || (client && !client->connection) || !plist) {
-		return PROPERTY_LIST_SERVICE_E_INVALID_ARG;
-	}
+	g_assert(client != NULL && client->connection != NULL && plist != NULL);
 
 	if (binary) {
 		plist_to_bin(plist, &content, &length);
@@ -135,31 +145,45 @@ static property_list_service_error_t internal_plist_send(property_list_service_c
 	}
 
 	if (!content || length == 0) {
-		return PROPERTY_LIST_SERVICE_E_PLIST_ERROR;
+		g_set_error(error, PROPERTY_LIST_SERVICE_ERROR,
+			PROPERTY_LIST_SERVICE_E_PLIST_ERROR,
+			"Property list error");
+		return;
 	}
 
 	nlen = GUINT32_TO_BE(length);
 	debug_info("sending %d bytes", length);
-	idevice_connection_send(client->connection, (const char*)&nlen, sizeof(nlen), (uint32_t*)&bytes);
+	bytes = idevice_connection_send(client->connection, (const char*)&nlen, sizeof(nlen), &idevice_error);
 	if (bytes == sizeof(nlen)) {
-		idevice_connection_send(client->connection, content, length, (uint32_t*)&bytes);
+		if (idevice_error != NULL) { // ignore error
+			g_error_free(idevice_error);
+			idevice_error = NULL;
+		}
+		bytes = idevice_connection_send(client->connection, content, length, &idevice_error);
 		if (bytes > 0) {
 			debug_info("sent %d bytes", bytes);
 			debug_plist(plist);
-			if ((uint32_t)bytes == length) {
-				res = PROPERTY_LIST_SERVICE_E_SUCCESS;
-			} else {
+			if ((uint32_t)bytes != length) {
 				debug_info("ERROR: Could not send all data (%d of %d)!", bytes, length);
+				g_set_error(error, PROPERTY_LIST_SERVICE_ERROR,
+					PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR,
+					"Could not send all data (%d of %d)",
+					bytes, length);
 			}
 		}
 	}
 	if (bytes <= 0) {
 		debug_info("ERROR: sending to device failed.");
+		g_set_error(error, PROPERTY_LIST_SERVICE_ERROR,
+			PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR,
+			"Sending to device failed");
 	}
 
+	if (idevice_error != NULL) {
+		g_error_free(idevice_error);
+		idevice_error = NULL;
+	}
 	free(content);
-
-	return res;
 }
 
 /**
@@ -173,9 +197,9 @@ static property_list_service_error_t internal_plist_send(property_list_service_c
  *      PROPERTY_LIST_SERVICE_E_PLIST_ERROR when dict is not a valid plist,
  *      or PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR when an unspecified error occurs.
  */
-property_list_service_error_t property_list_service_send_xml_plist(property_list_service_client_t client, plist_t plist)
+void property_list_service_send_xml_plist(property_list_service_client_t client, plist_t plist, GError **error)
 {
-	return internal_plist_send(client, plist, 0);
+	internal_plist_send(client, plist, 0, error);
 }
 
 /**
@@ -189,9 +213,9 @@ property_list_service_error_t property_list_service_send_xml_plist(property_list
  *      PROPERTY_LIST_SERVICE_E_PLIST_ERROR when dict is not a valid plist,
  *      or PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR when an unspecified error occurs.
  */
-property_list_service_error_t property_list_service_send_binary_plist(property_list_service_client_t client, plist_t plist)
+void property_list_service_send_binary_plist(property_list_service_client_t client, plist_t plist, GError **error)
 {
-	return internal_plist_send(client, plist, 1);
+	internal_plist_send(client, plist, 1, error);
 }
 
 /**
@@ -210,21 +234,32 @@ property_list_service_error_t property_list_service_send_binary_plist(property_l
  *      communication error occurs, or PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR
  *      when an unspecified error occurs.
  */
-static property_list_service_error_t internal_plist_receive_timeout(property_list_service_client_t client, plist_t *plist, unsigned int timeout)
+static plist_t internal_plist_receive_timeout(property_list_service_client_t client, unsigned int timeout, GError **error)
 {
-	property_list_service_error_t res = PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR;
+	//property_list_service_error_t res = PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR;
 	uint32_t pktlen = 0;
 	uint32_t bytes = 0;
+	plist_t plist = NULL;
+	plist_t res = NULL;
+	GError *idevice_error = NULL;
 
-	if (!client || (client && !client->connection) || !plist) {
-		return PROPERTY_LIST_SERVICE_E_INVALID_ARG;
+	if (!client || (client && !client->connection)) {
+		g_set_error(error, PROPERTY_LIST_SERVICE_ERROR,
+			PROPERTY_LIST_SERVICE_E_INVALID_ARG,
+			"Invalid argument");
+		return NULL;
 	}
 
-	idevice_connection_receive_timeout(client->connection, (char*)&pktlen, sizeof(pktlen), &bytes, timeout);
+	idevice_connection_receive_timeout(client->connection, (char*)&pktlen, sizeof(pktlen), &bytes, timeout, &idevice_error);
 	debug_info("initial read=%i", bytes);
 	if (bytes < 4) {
 		debug_info("initial read failed!");
-		return PROPERTY_LIST_SERVICE_E_MUX_ERROR;
+		if (idevice_error != NULL)
+			g_error_free(idevice_error);
+		g_set_error(error, PROPERTY_LIST_SERVICE_ERROR,
+			PROPERTY_LIST_SERVICE_E_MUX_ERROR,
+			"Initial read failed");
+		return NULL;
 	} else {
 		if ((char)pktlen == 0) { /* prevent huge buffers */
 			uint32_t curlen = 0;
@@ -234,29 +269,34 @@ static property_list_service_error_t internal_plist_receive_timeout(property_lis
 			content = (char*)malloc(pktlen);
 
 			while (curlen < pktlen) {
-				idevice_connection_receive(client->connection, content+curlen, pktlen-curlen, &bytes);
+				idevice_connection_receive(client->connection, content+curlen, pktlen-curlen, &bytes, &idevice_error);
 				if (bytes <= 0) {
-					res = PROPERTY_LIST_SERVICE_E_MUX_ERROR;
+					res = NULL;
 					break;
 				}
 				debug_info("received %d bytes", bytes);
 				curlen += bytes;
 			}
 			if (!memcmp(content, "bplist00", 8)) {
-				plist_from_bin(content, pktlen, plist);
+				plist_from_bin(content, pktlen, &plist);
 			} else {
-				plist_from_xml(content, pktlen, plist);
+				plist_from_xml(content, pktlen, &plist);
 			}
-			if (*plist) {
-				debug_plist(*plist);
-				res = PROPERTY_LIST_SERVICE_E_SUCCESS;
+			if (plist != NULL) {
+				debug_plist(plist);
+				res = plist;
 			} else {
-				res = PROPERTY_LIST_SERVICE_E_PLIST_ERROR;
+				g_set_error(error, PROPERTY_LIST_SERVICE_ERROR,
+					PROPERTY_LIST_SERVICE_E_PLIST_ERROR,
+					"Property list error");
+				res = NULL;
 			}
 			free(content);
 			content = NULL;
 		} else {
-			res = PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR;
+			g_set_error(error, PROPERTY_LIST_SERVICE_ERROR,
+				PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR,
+				"Unknown error");
 		}
 	}
 	return res;
@@ -279,9 +319,9 @@ static property_list_service_error_t internal_plist_receive_timeout(property_lis
  *      communication error occurs, or PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR when
  *      an unspecified error occurs.
  */
-property_list_service_error_t property_list_service_receive_plist_with_timeout(property_list_service_client_t client, plist_t *plist, unsigned int timeout)
+plist_t property_list_service_receive_plist_with_timeout(property_list_service_client_t client, unsigned int timeout, GError **error)
 {
-	return internal_plist_receive_timeout(client, plist, timeout);
+	return internal_plist_receive_timeout(client, timeout, error);
 }
 
 /**
@@ -303,9 +343,9 @@ property_list_service_error_t property_list_service_receive_plist_with_timeout(p
  *      communication error occurs, or PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR when
  *      an unspecified error occurs.
  */
-property_list_service_error_t property_list_service_receive_plist(property_list_service_client_t client, plist_t *plist)
+plist_t property_list_service_receive_plist(property_list_service_client_t client, GError **error)
 {
-	return internal_plist_receive_timeout(client, plist, 10000);
+	return internal_plist_receive_timeout(client, 10000, error);
 }
 
 /**
@@ -319,11 +359,11 @@ property_list_service_error_t property_list_service_receive_plist(property_list_
  *     NULL, PROPERTY_LIST_SERVICE_E_SSL_ERROR when SSL could not be enabled,
  *     or PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR otherwise.
  */
-property_list_service_error_t property_list_service_enable_ssl(property_list_service_client_t client)
+void property_list_service_enable_ssl(property_list_service_client_t client, GError **error)
 {
-	if (!client || !client->connection)
-		return PROPERTY_LIST_SERVICE_E_INVALID_ARG;
-	return idevice_to_property_list_service_error(idevice_connection_enable_ssl(client->connection));
+	g_assert(client != NULL && client->connection != NULL);
+
+	idevice_connection_enable_ssl(client->connection, error);
 }
 
 /**
@@ -336,10 +376,9 @@ property_list_service_error_t property_list_service_enable_ssl(property_list_ser
  *     PROPERTY_LIST_SERVICE_E_INVALID_ARG if client or client->connection is
  *     NULL, or PROPERTY_LIST_SERVICE_E_UNKNOWN_ERROR otherwise.
  */
-property_list_service_error_t property_list_service_disable_ssl(property_list_service_client_t client)
+void property_list_service_disable_ssl(property_list_service_client_t client)
 {
-	if (!client || !client->connection)
-		return PROPERTY_LIST_SERVICE_E_INVALID_ARG;
-	return idevice_to_property_list_service_error(idevice_connection_disable_ssl(client->connection));
+	g_assert(client != NULL && client->connection != NULL);
+	idevice_connection_disable_ssl(client->connection);
 }
 

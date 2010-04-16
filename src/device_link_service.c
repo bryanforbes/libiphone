@@ -24,6 +24,12 @@
 #include "property_list_service.h"
 #include "debug.h"
 
+GQuark
+device_link_service_error_quark (void)
+{
+  return g_quark_from_static_string ("device-link-service-error-quark");
+}
+
 /**
  * Internally used function to extract the message string from a DLMessage*
  * plist.
@@ -78,24 +84,27 @@ static char *device_link_service_get_message(plist_t dl_msg)
  *     DEVICE_LINK_SERVICE_E_INVALID_ARG when one of the parameters is invalid,
  *     or DEVICE_LINK_SERVICE_E_MUX_ERROR when the connection failed.
  */
-device_link_service_error_t device_link_service_client_new(idevice_t device, uint16_t port, device_link_service_client_t *client)
+device_link_service_client_t device_link_service_client_new(idevice_t device, uint16_t port, GError **error)
 {
-	if (!device || port == 0 || !client || *client) {
-		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
-	}
+	GError *plist_error = NULL;
 
-	property_list_service_client_t plistclient = NULL;
-	if (property_list_service_client_new(device, port, &plistclient) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		return DEVICE_LINK_SERVICE_E_MUX_ERROR;
+	g_assert(device != NULL && port > 0);
+
+	property_list_service_client_t plistclient = property_list_service_client_new(device, port, &plist_error);
+	if (plistclient == NULL) {
+		g_set_error_literal(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_MUX_ERROR,
+			plist_error->message);
+		g_error_free(plist_error);
+		return NULL;
 	}
 
 	/* create client object */
 	device_link_service_client_t client_loc = (device_link_service_client_t) malloc(sizeof(struct device_link_service_client_private));
 	client_loc->parent = plistclient;
 
-	/* all done, return success */
-	*client = client_loc;
-	return DEVICE_LINK_SERVICE_E_SUCCESS;
+	/* all done, return client */
+	return client_loc;
 }
 
 /**
@@ -108,15 +117,15 @@ device_link_service_error_t device_link_service_client_new(idevice_t device, uin
  *     is invalid, or DEVICE_LINK_SERVICE_E_UNKNOWN_ERROR when the was an error
  *     freeing the parent property_list_service client.
  */
-device_link_service_error_t device_link_service_client_free(device_link_service_client_t client)
+void device_link_service_client_free(device_link_service_client_t client, GError **error)
 {
-	if (!client)
-		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
+	g_assert(client != NULL);
 
-	if (property_list_service_client_free(client->parent) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		return DEVICE_LINK_SERVICE_E_UNKNOWN_ERROR;
+	GError *plist_error = NULL;
+	property_list_service_client_free(client->parent, &plist_error);
+	if (plist_error != NULL) {
+		g_propagate_error(error, plist_error);
 	}
-	return DEVICE_LINK_SERVICE_E_SUCCESS;
 }
 
 /**
@@ -136,27 +145,30 @@ device_link_service_error_t device_link_service_client_free(device_link_service_
  *     given by the device is larger than the given version,
  *     or DEVICE_LINK_SERVICE_E_UNKNOWN_ERROR otherwise.
  */
-device_link_service_error_t device_link_service_version_exchange(device_link_service_client_t client, uint64_t version_major, uint64_t version_minor)
+void device_link_service_version_exchange(device_link_service_client_t client, uint64_t version_major, uint64_t version_minor, GError **error)
 {
-	if (!client)
-		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
-	
-	device_link_service_error_t err = DEVICE_LINK_SERVICE_E_UNKNOWN_ERROR;
+	g_assert(client != NULL);
 
 	/* perform version exchange */
+	GError *plist_error = NULL;
 	plist_t array = NULL;
 	char *msg = NULL;
 
 	/* receive DLMessageVersionExchange from device */
-	if (property_list_service_receive_plist(client->parent, &array) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
+	array = property_list_service_receive_plist(client->parent, &plist_error);
+	if (array == NULL) {
 		debug_info("Did not receive initial message from device!");
-		err = DEVICE_LINK_SERVICE_E_MUX_ERROR;
+		g_set_error(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_MUX_ERROR,
+			"Did not receive initial message from device");
 		goto leave;
 	}
 	msg = device_link_service_get_message(array);
 	if (!msg || strcmp(msg, "DLMessageVersionExchange")) {
 		debug_info("Did not receive DLMessageVersionExchange from device!");
-		err = DEVICE_LINK_SERVICE_E_PLIST_ERROR;
+		g_set_error(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_PLIST_ERROR,
+			"Did no receive DLMessageVersionExchange from device");
 		goto leave;
 	}
 	free(msg);
@@ -165,7 +177,9 @@ device_link_service_error_t device_link_service_version_exchange(device_link_ser
 	/* get major and minor version number */
 	if (plist_array_get_size(array) < 3) {
 		debug_info("DLMessageVersionExchange has unexpected format!");
-		err = DEVICE_LINK_SERVICE_E_PLIST_ERROR;
+		g_set_error(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_PLIST_ERROR,
+			"DLMessageVersionExchange has unexpected format");
 		goto leave;
 	}
 	plist_t maj = plist_array_get_item(array, 1);
@@ -180,11 +194,17 @@ device_link_service_error_t device_link_service_version_exchange(device_link_ser
 	}
 	if (vmajor > version_major) {
 		debug_info("Version mismatch: device=(%lld,%lld) > expected=(%lld,%lld)", vmajor, vminor, version_major, version_minor);
-		err = DEVICE_LINK_SERVICE_E_BAD_VERSION;
+		g_set_error(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_BAD_VERSION,
+			"Version mismatch: device=(%lld,%lld) > expected=(%lld,%lld)",
+			(long long int)vmajor, (long long int)vminor, (long long int)version_major, (long long int)version_minor);
 		goto leave;
 	} else if ((vmajor == version_major) && (vminor > version_minor)) {
 		debug_info("WARNING: Version mismatch: device=(%lld,%lld) > expected=(%lld,%lld)", vmajor, vminor, version_major, version_minor);
-		err = DEVICE_LINK_SERVICE_E_BAD_VERSION;
+		g_set_error(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_BAD_VERSION,
+			"WARNING: Version mismatch: device=(%lld,%lld) > expected=(%lld,%lld)",
+			(long long int)vmajor, (long long int)vminor, (long long int)version_major, (long long int)version_minor);
 		goto leave;
 	}
 	plist_free(array);
@@ -194,36 +214,45 @@ device_link_service_error_t device_link_service_version_exchange(device_link_ser
 	plist_array_append_item(array, plist_new_string("DLMessageVersionExchange"));
 	plist_array_append_item(array, plist_new_string("DLVersionsOk"));
 	plist_array_append_item(array, plist_new_uint(version_major));
-	if (property_list_service_send_binary_plist(client->parent, array) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
+	property_list_service_send_binary_plist(client->parent, array, &plist_error);
+	if (plist_error != NULL) {
 		debug_info("Error when sending DLVersionsOk");
-		err = DEVICE_LINK_SERVICE_E_MUX_ERROR;
+		g_set_error(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_MUX_ERROR,
+			"Error when sending DLVersionsOk");
 		goto leave;
 	}
 	plist_free(array);
 
 	/* receive DeviceReady message */
 	array = NULL;
-	if (property_list_service_receive_plist(client->parent, &array) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
+	array = property_list_service_receive_plist(client->parent, &plist_error);
+	if (array == NULL) {
 		debug_info("Error when receiving DLMessageDeviceReady!");
-		err = DEVICE_LINK_SERVICE_E_MUX_ERROR;
+		g_set_error(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_MUX_ERROR,
+			"Error when receiving DLMessageDeviceReady!");
 		goto leave;
 	}
 	msg = device_link_service_get_message(array);
 	if (!msg || strcmp(msg, "DLMessageDeviceReady")) {
 		debug_info("Did not get DLMessageDeviceReady!");
-		err = DEVICE_LINK_SERVICE_E_PLIST_ERROR;
+		g_set_error(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_PLIST_ERROR,
+			"Did not get DLMessageDeviceReady!");
 		goto leave;
 	}
-	err = DEVICE_LINK_SERVICE_E_SUCCESS;
 
 leave:
 	if (msg) {
 		free(msg);
 	}
+	if (plist_error) {
+		g_error_free(plist_error);
+	}
 	if (array) {
 		plist_free(array);
 	}
-	return err;
 }
 
 /**
@@ -236,21 +265,20 @@ leave:
  *     or DEVICE_LINK_SERVICE_E_MUX_ERROR when there's an error when sending
  *     the the disconnect message.
  */
-device_link_service_error_t device_link_service_disconnect(device_link_service_client_t client)
+void device_link_service_disconnect(device_link_service_client_t client, GError **error)
 {
-	if (!client)
-		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
+	g_assert(client != NULL);
 
 	plist_t array = plist_new_array();
 	plist_array_append_item(array, plist_new_string("DLMessageDisconnect"));
 	plist_array_append_item(array, plist_new_string("All done, thanks for the memories"));
 
-	device_link_service_error_t err = DEVICE_LINK_SERVICE_E_SUCCESS;
-	if (property_list_service_send_binary_plist(client->parent, array) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		err = DEVICE_LINK_SERVICE_E_MUX_ERROR;
+	GError *plist_error = NULL;
+	property_list_service_send_binary_plist(client->parent, array, &plist_error);
+	if (plist_error != NULL) {
+		g_propagate_error(error, plist_error);
 	}
 	plist_free(array);
-	return err;
 }
 
 /**
@@ -264,21 +292,20 @@ device_link_service_error_t device_link_service_disconnect(device_link_service_c
  *     or DEVICE_LINK_SERVICE_E_MUX_ERROR if the DLMessagePing plist could
  *     not be sent.
  */
-device_link_service_error_t device_link_service_send_ping(device_link_service_client_t client, const char *message)
+void device_link_service_send_ping(device_link_service_client_t client, const char *message, GError **error)
 {
-	if (!client || !client->parent || !message)
-		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
+	g_assert(client != NULL && message != NULL);
 
 	plist_t array = plist_new_array();
 	plist_array_append_item(array, plist_new_string("DLMessagePing"));
 	plist_array_append_item(array, plist_new_string(message));
 
-	device_link_service_error_t err = DEVICE_LINK_SERVICE_E_SUCCESS;
-	if (property_list_service_send_binary_plist(client->parent, array) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		err = DEVICE_LINK_SERVICE_E_MUX_ERROR;
+	GError *plist_error = NULL;
+	property_list_service_send_binary_plist(client->parent, array, &plist_error);
+	if (plist_error != NULL) {
+		g_propagate_error(error, plist_error);
 	}
 	plist_free(array);
-	return err;
 }
 
 /**
@@ -292,24 +319,21 @@ device_link_service_error_t device_link_service_send_ping(device_link_service_cl
  *     message is not a PLIST_DICT, or DEVICE_LINK_SERVICE_E_MUX_ERROR if
  *     the DLMessageProcessMessage plist could not be sent.
  */
-device_link_service_error_t device_link_service_send_process_message(device_link_service_client_t client, plist_t message)
+void device_link_service_send_process_message(device_link_service_client_t client, plist_t message, GError **error)
 {
-	if (!client || !client->parent || !message)
-		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
-
-	if (plist_get_node_type(message) != PLIST_DICT)
-		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
+	g_assert(client != NULL && client->parent != NULL && message != NULL);
+	g_assert(plist_get_node_type(message) == PLIST_DICT);
 
 	plist_t array = plist_new_array();
 	plist_array_append_item(array, plist_new_string("DLMessageProcessMessage"));
 	plist_array_append_item(array, plist_copy(message));
 
-	device_link_service_error_t err = DEVICE_LINK_SERVICE_E_SUCCESS;
-	if (property_list_service_send_binary_plist(client->parent, array) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		err = DEVICE_LINK_SERVICE_E_MUX_ERROR;
+	GError *plist_error = NULL;
+	property_list_service_send_binary_plist(client->parent, array, &plist_error);
+	if (plist_error != NULL) {
+		g_propagate_error(error, plist_error);
 	}
 	plist_free(array);
-	return err;
 }
 
 /**
@@ -325,38 +349,46 @@ device_link_service_error_t device_link_service_send_process_message(device_link
  *    invalid or is not a DLMessageProcessMessage,
  *    or DEVICE_LINK_SERVICE_E_MUX_ERROR if receiving from device fails.
  */
-device_link_service_error_t device_link_service_receive_process_message(device_link_service_client_t client, plist_t *message)
+plist_t device_link_service_receive_process_message(device_link_service_client_t client, GError **error)
 {
-	if (!client || !client->parent || !message)
-		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
+	g_assert(client != NULL && client->parent != NULL);
 
-	plist_t pmsg = NULL;
-	if (property_list_service_receive_plist(client->parent, &pmsg) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		return DEVICE_LINK_SERVICE_E_MUX_ERROR;
+	GError *plist_error = NULL;
+	plist_t pmsg = property_list_service_receive_plist(client->parent, &plist_error);
+	if (pmsg == NULL) {
+		g_set_error_literal(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_MUX_ERROR,
+			plist_error->message);
+		g_error_free(plist_error);
+		return NULL;
 	}
-
-	device_link_service_error_t err = DEVICE_LINK_SERVICE_E_UNKNOWN_ERROR;
 
 	char *msg = device_link_service_get_message(pmsg);
 	if (!msg || strcmp(msg, "DLMessageProcessMessage")) {
 		debug_info("Did not receive DLMessageProcessMessage as expected!");
-		err = DEVICE_LINK_SERVICE_E_PLIST_ERROR;
+		g_set_error(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_PLIST_ERROR,
+			"Did not receive DLMessageProcessMessage as expected!");
 		goto leave;
 	}
 
 	if (plist_array_get_size(pmsg) != 2) {
 		debug_info("Malformed plist received for DLMessageProcessMessage");
-		err = DEVICE_LINK_SERVICE_E_PLIST_ERROR;
+		g_set_error(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_PLIST_ERROR,
+			"Malformed plist received for DLMessageProcessMessage");
 		goto leave;
 	}
 
+	plist_t res = NULL;
 	plist_t msg_loc = plist_array_get_item(pmsg, 1);
+
 	if (msg_loc) {
-		*message = plist_copy(msg_loc);
-		err = DEVICE_LINK_SERVICE_E_SUCCESS;
+		res = plist_copy(msg_loc);
 	} else {
-		*message = NULL;
-		err = DEVICE_LINK_SERVICE_E_PLIST_ERROR;
+		g_set_error(error, DEVICE_LINK_SERVICE_ERROR,
+			DEVICE_LINK_SERVICE_E_PLIST_ERROR,
+			"Property list error");
 	}
 
 leave:
@@ -365,7 +397,7 @@ leave:
 	if (pmsg)
 		plist_free(pmsg);
 
-	return err;
+	return res;
 }
 
 /**
@@ -379,15 +411,11 @@ leave:
  *     or DEVICE_LINK_SERVICE_E_MUX_ERROR when the given property list could
  *     not be sent.
  */
-device_link_service_error_t device_link_service_send(device_link_service_client_t client, plist_t plist)
+void device_link_service_send(device_link_service_client_t client, plist_t plist, GError **error)
 {
-	if (!client || !plist) {
-		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
-	}
-	if (property_list_service_send_binary_plist(client->parent, plist) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		return DEVICE_LINK_SERVICE_E_MUX_ERROR;
-	}
-	return DEVICE_LINK_SERVICE_E_SUCCESS;
+	g_assert(client != NULL && plist != NULL);
+
+	property_list_service_send_binary_plist(client->parent, plist, error);
 }
 
 /* Generic device link service receive function.
@@ -401,15 +429,19 @@ device_link_service_error_t device_link_service_send(device_link_service_client_
  *     or DEVICE_LINK_SERVICE_E_MUX_ERROR when no property list could be
  *     received.
  */
-device_link_service_error_t device_link_service_receive(device_link_service_client_t client, plist_t *plist)
+plist_t device_link_service_receive(device_link_service_client_t client, GError **error)
 {
-	if (!client || !plist || (plist && *plist)) {
-		return DEVICE_LINK_SERVICE_E_INVALID_ARG;
-	}
+	g_assert(client != NULL && client->parent != NULL);
 
-	if (property_list_service_receive_plist(client->parent, plist) != PROPERTY_LIST_SERVICE_E_SUCCESS) {
-		return DEVICE_LINK_SERVICE_E_MUX_ERROR;
+	GError *plist_error = NULL;
+	plist_t plist = property_list_service_receive_plist(client->parent, &plist_error);
+	if (plist_error != NULL) {
+		g_propagate_error(error, plist_error);
+		if (plist != NULL) {
+			plist_free(plist);
+		}
+		return NULL;
 	}
-	return DEVICE_LINK_SERVICE_E_SUCCESS;
+	return plist;
 }
 

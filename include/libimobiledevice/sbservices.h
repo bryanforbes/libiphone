@@ -30,14 +30,16 @@ extern "C" {
 #include <libimobiledevice/libimobiledevice.h>
 
 /** @name Error Codes */
-/*@{*/
-#define SBSERVICES_E_SUCCESS                0
-#define SBSERVICES_E_INVALID_ARG           -1
-#define SBSERVICES_E_PLIST_ERROR           -2
-#define SBSERVICES_E_CONN_FAILED           -3
+typedef enum {
+	SBSERVICES_E_SUCCESS            =    0,
+	SBSERVICES_E_INVALID_ARG        =   -1,
+	SBSERVICES_E_PLIST_ERROR        =   -2,
+	SBSERVICES_E_CONN_FAILED        =   -3,
+	SBSERVICES_E_UNKNOWN_ERROR      = -256
+} SBServicesClientErrorEnum;
 
-#define SBSERVICES_E_UNKNOWN_ERROR       -256
-/*@}*/
+#define SBSERVICES_CLIENT_ERROR sbservices_client_error_quark()
+GQuark       sbservices_client_error_quark      (void);
 
 /** Represents an error code. */
 typedef int16_t sbservices_error_t;
@@ -46,11 +48,11 @@ typedef struct sbservices_client_private sbservices_client_private;
 typedef sbservices_client_private *sbservices_client_t; /**< The client handle. */
 
 /* Interface */
-sbservices_error_t sbservices_client_new(idevice_t device, uint16_t port, sbservices_client_t *client);
-sbservices_error_t sbservices_client_free(sbservices_client_t client);
-sbservices_error_t sbservices_get_icon_state(sbservices_client_t client, plist_t *state);
-sbservices_error_t sbservices_set_icon_state(sbservices_client_t client, plist_t newstate);
-sbservices_error_t sbservices_get_icon_pngdata(sbservices_client_t client, const char *bundleId, char **pngdata, uint64_t *pngsize);
+sbservices_client_t sbservices_client_new(idevice_t device, uint16_t port, GError **error);
+void sbservices_client_free(sbservices_client_t client, GError **error);
+plist_t sbservices_get_icon_state(sbservices_client_t client, GError **error);
+void sbservices_set_icon_state(sbservices_client_t client, plist_t newstate, GError **error);
+void sbservices_get_icon_pngdata(sbservices_client_t client, const char *bundleId, char **pngdata, uint64_t *pngsize, GError **error);
 
 #ifdef __cplusplus
 }

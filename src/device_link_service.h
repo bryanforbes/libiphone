@@ -24,13 +24,17 @@
 #include "property_list_service.h"
 
 /* Error Codes */
-#define DEVICE_LINK_SERVICE_E_SUCCESS                0
-#define DEVICE_LINK_SERVICE_E_INVALID_ARG           -1
-#define DEVICE_LINK_SERVICE_E_PLIST_ERROR           -2
-#define DEVICE_LINK_SERVICE_E_MUX_ERROR             -3
-#define DEVICE_LINK_SERVICE_E_BAD_VERSION           -4
+typedef enum {
+	DEVICE_LINK_SERVICE_E_SUCCESS               =  0,
+	DEVICE_LINK_SERVICE_E_INVALID_ARG           = -1,
+	DEVICE_LINK_SERVICE_E_PLIST_ERROR           = -2,
+	DEVICE_LINK_SERVICE_E_MUX_ERROR             = -3,
+	DEVICE_LINK_SERVICE_E_BAD_VERSION           = -4,
+	DEVICE_LINK_SERVICE_E_UNKNOWN_ERROR       = -256
+} DeviceLinkServiceErrorEnum;
 
-#define DEVICE_LINK_SERVICE_E_UNKNOWN_ERROR       -256
+#define DEVICE_LINK_SERVICE_ERROR device_link_service_error_quark()
+GQuark       device_link_service_error_quark      (void);
 
 /** Represents an error code. */
 typedef int16_t device_link_service_error_t;
@@ -41,14 +45,15 @@ struct device_link_service_client_private {
 
 typedef struct device_link_service_client_private *device_link_service_client_t;
 
-device_link_service_error_t device_link_service_client_new(idevice_t device, uint16_t port, device_link_service_client_t *client);
-device_link_service_error_t device_link_service_client_free(device_link_service_client_t client);
-device_link_service_error_t device_link_service_version_exchange(device_link_service_client_t client, uint64_t version_major, uint64_t version_minor);
-device_link_service_error_t device_link_service_send_ping(device_link_service_client_t client, const char *message);
-device_link_service_error_t device_link_service_send_process_message(device_link_service_client_t client, plist_t message);
-device_link_service_error_t device_link_service_receive_process_message(device_link_service_client_t client, plist_t *message);
-device_link_service_error_t device_link_service_disconnect(device_link_service_client_t client);
-device_link_service_error_t device_link_service_send(device_link_service_client_t client, plist_t plist);
-device_link_service_error_t device_link_service_receive(device_link_service_client_t client, plist_t *plist);
+device_link_service_client_t device_link_service_client_new(idevice_t device, uint16_t port, GError **error);
+void device_link_service_client_free(device_link_service_client_t client, GError **error);
+
+void device_link_service_version_exchange(device_link_service_client_t client, uint64_t version_major, uint64_t version_minor, GError **error);
+void device_link_service_send_ping(device_link_service_client_t client, const char *message, GError **error);
+void device_link_service_send_process_message(device_link_service_client_t client, plist_t message, GError **error);
+plist_t device_link_service_receive_process_message(device_link_service_client_t client, GError **error);
+void device_link_service_disconnect(device_link_service_client_t client, GError **error);
+void device_link_service_send(device_link_service_client_t client, plist_t plist, GError **error);
+plist_t device_link_service_receive(device_link_service_client_t client, GError **error);
 
 #endif

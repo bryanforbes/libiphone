@@ -31,17 +31,20 @@ extern "C" {
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <plist/plist.h>
+#include <glib.h>
 
-/** @name Error Codes */
-/*@{*/
-#define IDEVICE_E_SUCCESS                0
-#define IDEVICE_E_INVALID_ARG           -1
-#define IDEVICE_E_UNKNOWN_ERROR         -2
-#define IDEVICE_E_NO_DEVICE             -3
-#define IDEVICE_E_NOT_ENOUGH_DATA       -4
-#define IDEVICE_E_BAD_HEADER            -5
-#define IDEVICE_E_SSL_ERROR             -6
-/*@}*/
+typedef enum {
+	IDEVICE_E_SUCCESS                =  0,
+	IDEVICE_E_INVALID_ARG            = -1,
+	IDEVICE_E_UNKNOWN_ERROR          = -2,
+	IDEVICE_E_NO_DEVICE              = -3,
+	IDEVICE_E_NOT_ENOUGH_DATA        = -4,
+	IDEVICE_E_BAD_HEADER             = -5,
+	IDEVICE_E_SSL_ERROR              = -6
+} iDeviceErrorEnum;
+
+#define IDEVICE_ERROR idevice_error_quark()
+GQuark       idevice_error_quark      (void);
 
 /** Represents an error code. */
 typedef int16_t idevice_error_t;
@@ -75,29 +78,29 @@ typedef struct {
 typedef void (*idevice_event_cb_t) (const idevice_event_t *event, void *user_data);
 
 /* functions */
-idevice_error_t idevice_event_subscribe(idevice_event_cb_t callback, void *user_data);
-idevice_error_t idevice_event_unsubscribe();
+void idevice_event_subscribe(idevice_event_cb_t callback, void *user_data, GError **error);
+void idevice_event_unsubscribe(GError **error);
 
 /* discovery (synchronous) */
-idevice_error_t idevice_get_device_list(char ***devices, int *count);
-idevice_error_t idevice_device_list_free(char **devices);
+void idevice_get_device_list(char ***devices, int *count, GError **error);
+void idevice_device_list_free(char **devices);
 
 /* device structure creation and destruction */
-idevice_error_t idevice_new(idevice_t *device, const char *uuid);
-idevice_error_t idevice_free(idevice_t device);
+idevice_t idevice_new(const char *uuid, GError **error);
+void idevice_free(idevice_t device);
 
 /* connection/disconnection */
-idevice_error_t idevice_connect(idevice_t device, uint16_t port, idevice_connection_t *connection);
-idevice_error_t idevice_disconnect(idevice_connection_t connection);
+idevice_connection_t idevice_connect(idevice_t device, uint16_t port, GError **error);
+void idevice_disconnect(idevice_connection_t connection, GError **error);
 
 /* communication */
-idevice_error_t idevice_connection_send(idevice_connection_t connection, const char *data, uint32_t len, uint32_t *sent_bytes);
-idevice_error_t idevice_connection_receive_timeout(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, unsigned int timeout);
-idevice_error_t idevice_connection_receive(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes);
+uint32_t idevice_connection_send(idevice_connection_t connection, const char *data, uint32_t len, GError **error);
+void idevice_connection_receive_timeout(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, unsigned int timeout, GError **error);
+void idevice_connection_receive(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, GError **error);
 
 /* misc */
-idevice_error_t idevice_get_handle(idevice_t device, uint32_t *handle);
-idevice_error_t idevice_get_uuid(idevice_t device, char **uuid);
+uint32_t idevice_get_handle(idevice_t device, GError **error);
+char* idevice_get_uuid(idevice_t device, GError **error);
 
 #ifdef __cplusplus
 }
