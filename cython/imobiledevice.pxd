@@ -1,20 +1,7 @@
 cimport plist
 
 include "stdint.pxi"
-
-cdef extern from "pyerrors.h":
-    ctypedef class __builtin__.Exception [object PyBaseExceptionObject]:
-        pass
-
-cdef class BaseError(Exception):
-    cdef dict _lookup_table
-    cdef int16_t _c_errcode
-
-cdef class Base:
-    cdef inline int handle_error(self, int16_t ret) except -1
-    cdef inline BaseError _error(self, int16_t ret)
-
-cdef class iDeviceError(BaseError): pass
+include "glib.pxi"
 
 cdef extern from "libimobiledevice/libimobiledevice.h":
     cdef struct idevice_private:
@@ -35,24 +22,24 @@ cdef extern from "libimobiledevice/libimobiledevice.h":
 cdef class iDeviceEvent:
     cdef const_idevice_event_t _c_event
 
-cdef class iDeviceConnection(Base):
+cdef class iDeviceConnection(object):
     cdef idevice_connection_t _c_connection
 
     cpdef disconnect(self)
 
-cdef class iDevice(Base):
+cdef class iDevice(object):
     cdef idevice_t _c_dev
 
     cpdef iDeviceConnection connect(self, uint16_t port)
 
-cdef class BaseService(Base):
+cdef class BaseService(object):
     pass
 
 cdef class PropertyListService(BaseService):
     cpdef send(self, plist.Node node)
     cpdef object receive(self)
-    cdef inline int16_t _send(self, plist.plist_t node)
-    cdef inline int16_t _receive(self, plist.plist_t* c_node)
+    cdef inline _send(self, plist.plist_t node, GError **error)
+    cdef inline plist.plist_t _receive(self, GError **error)
 
 cdef extern from "libimobiledevice/lockdown.h":
     cdef struct lockdownd_client_private:
@@ -64,8 +51,6 @@ cdef extern from "libimobiledevice/lockdown.h":
         char *host_id
         char *root_certificate
     ctypedef lockdownd_pair_record *lockdownd_pair_record_t
-
-cdef class LockdownError(BaseError): pass
 
 cdef class LockdownPairRecord:
     cdef lockdownd_pair_record_t _c_record

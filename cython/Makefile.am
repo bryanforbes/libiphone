@@ -7,6 +7,8 @@ if HAVE_CYTHON
 
 BUILT_SOURCES = imobiledevice.c
 PXDINCLUDES = imobiledevice.pxd stdint.pxi $(CYTHON_PLIST_INCLUDE_DIR)/plist.pxd
+PYGLIBCFLAGS = -I`pkg-config pygobject-2.0 --variable=pygtkincludedir`
+PYGLIBLDFLAGS = -lpyglib-2.0-python$(PYTHON_VERSION)
 PXIINCLUDES =					\
 	stdint.pxi					\
 	lockdown.pxi				\
@@ -31,8 +33,8 @@ EXTRA_DIST = imobiledevice.pyx imobiledevice.pxd $(PXIINCLUDES)
 imobiledevicedir = $(pyexecdir)
 imobiledevice_LTLIBRARIES = imobiledevice.la
 imobiledevice_la_SOURCES = imobiledevice.pyx
-imobiledevice_la_CFLAGS = -I../include -I../src $(PYTHON_CPPFLAGS) $(AM_CFLAGS)
-imobiledevice_la_LDFLAGS = -module -avoid-version -L$(libdir) $(PYTHON_LDFLAGS) $(AM_LDFLAGS)
+imobiledevice_la_CFLAGS = -I../include -I../src $(PYTHON_CPPFLAGS) $(AM_CFLAGS) $(PYGLIBCFLAGS)
+imobiledevice_la_LDFLAGS = -module -avoid-version -L$(libdir) $(PYTHON_LDFLAGS) $(AM_LDFLAGS) $(PYGLIBLDFLAGS)
 imobiledevice_la_LIBADD = ../src/libimobiledevice.la
 
 imobiledevice.c: imobiledevice.pyx $(PXDINCLUDES) $(PXIINCLUDES)

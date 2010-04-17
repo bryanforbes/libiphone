@@ -83,6 +83,7 @@ AC_ARG_WITH([cython],
 if test "$build_cython" = "true" -a "$CYTHON" != "false" ; then
             CYTHON_SUB=cython
 			CYTHON_PLIST_INCLUDE_DIR=$($PKG_CONFIG --variable=includedir libplist)/plist/cython
+			PKG_CHECK_MODULES(pygobject, pygobject-2.0 >= 2.18.0)
 else
             CYTHON_SUB=
 	    cython_python_bindings=no

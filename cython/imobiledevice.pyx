@@ -1,36 +1,7 @@
-cdef class BaseError(Exception):
-    def __cinit__(self, int16_t errcode):
-        self._c_errcode = errcode
-
-    def __nonzero__(self):
-        return self._c_errcode != 0
-
-    property message:
-        def __get__(self):
-            return self._lookup_table[self._c_errcode]
-
-    property code:
-        def __get__(self):
-            return self._c_errcode
-
-    def __str__(self):
-        return '%s (%s)' % (self.message, self.code)
-
-    def __repr__(self):
-        return self.__str__()
-
-cdef class Base:
-    cdef inline int handle_error(self, int16_t ret) except -1:
-        if ret == 0:
-            return 0
-        cdef BaseError err = self._error(ret)
-        raise err
-        return -1
-
-    cdef inline BaseError _error(self, int16_t ret): pass
+pyglib_init()
 
 cdef extern from "libimobiledevice/libimobiledevice.h":
-    ctypedef enum idevice_error_t:
+    ctypedef enum iDeviceErrorEnum:
         IDEVICE_E_SUCCESS = 0
         IDEVICE_E_INVALID_ARG = -1
         IDEVICE_E_UNKNOWN_ERROR = -2
@@ -38,34 +9,35 @@ cdef extern from "libimobiledevice/libimobiledevice.h":
         IDEVICE_E_NOT_ENOUGH_DATA = -4
         IDEVICE_E_BAD_HEADER = -5
         IDEVICE_E_SSL_ERROR = -6
-    ctypedef void (*idevice_event_cb_t) (const_idevice_event_t event, void *user_data)
-    cdef extern idevice_error_t idevice_event_subscribe(idevice_event_cb_t callback, void *user_data)
-    cdef extern idevice_error_t idevice_event_unsubscribe()
-    idevice_error_t idevice_get_device_list(char ***devices, int *count)
-    idevice_error_t idevice_device_list_free(char **devices)
-    void idevice_set_debug_level(int level)
-    idevice_error_t idevice_new(idevice_t *device, char *uuid)
-    idevice_error_t idevice_free(idevice_t device)
-    idevice_error_t idevice_get_uuid(idevice_t device, char** uuid)
-    idevice_error_t idevice_get_handle(idevice_t device, uint32_t *handle)
-    idevice_error_t idevice_connect(idevice_t device, uint16_t port, idevice_connection_t *connection)
-    idevice_error_t idevice_disconnect(idevice_connection_t connection)
-    idevice_error_t idevice_connection_send(idevice_connection_t connection, char *data, uint32_t len, uint32_t *sent_bytes)
-    idevice_error_t idevice_connection_receive_timeout(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, unsigned int timeout)
-    idevice_error_t idevice_connection_receive(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes)
+    GQuark       idevice_error_quark()
 
-cdef class iDeviceError(BaseError):
-    def __init__(self, *args, **kwargs):
-        self._lookup_table = {
-            IDEVICE_E_SUCCESS: 'Success',
-            IDEVICE_E_INVALID_ARG: 'Invalid argument',
-            IDEVICE_E_UNKNOWN_ERROR: 'Unknown error',
-            IDEVICE_E_NO_DEVICE: 'No device',
-            IDEVICE_E_NOT_ENOUGH_DATA: 'Not enough data',
-            IDEVICE_E_BAD_HEADER: 'Bad header',
-            IDEVICE_E_SSL_ERROR: 'SSL Error'
-        }
-        BaseError.__init__(self, *args, **kwargs)
+    void idevice_set_debug_level(int level)
+    ctypedef void (*idevice_event_cb_t) (const_idevice_event_t event, void *user_data)
+    void idevice_event_subscribe(idevice_event_cb_t callback, void *user_data, GError **error)
+    void idevice_event_unsubscribe(GError **error)
+
+    void idevice_get_device_list(char ***devices, int *count, GError **error)
+    void idevice_device_list_free(char **devices)
+
+    idevice_t idevice_new(char *uuid, GError **error)
+    void idevice_free(idevice_t device)
+
+    idevice_connection_t idevice_connect(idevice_t device, uint16_t port, GError **error)
+    void idevice_disconnect(idevice_connection_t connection, GError **error)
+
+    uint32_t idevice_connection_send(idevice_connection_t connection, char *data, uint32_t len, GError **error)
+    void idevice_connection_receive_timeout(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, unsigned int timeout, GError **error)
+    void idevice_connection_receive(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, GError **error)
+
+    uint32_t idevice_get_handle(idevice_t device, GError **error)
+    char* idevice_get_uuid(idevice_t device, GError **error)
+
+iDeviceError = pyglib_register_exception_for_domain("imobiledevice.iDeviceError", idevice_error_quark())
+
+cdef int handle_error(GError *error) except -1:
+    if pyglib_error_check(&error):
+        return -1
+    return 0
 
 def set_debug_level(int level):
     idevice_set_debug_level(level)
@@ -93,12 +65,14 @@ cdef void idevice_event_cb(const_idevice_event_t c_event, void *user_data) with 
     (<object>user_data)(event)
 
 def event_subscribe(object callback):
-    cdef iDeviceError err = iDeviceError(idevice_event_subscribe(idevice_event_cb, <void*>callback))
-    if err: raise err
+    cdef GError *err = NULL
+    idevice_event_subscribe(idevice_event_cb, <void*>callback, &err)
+    handle_error(err)
 
 def event_unsubscribe():
-    cdef iDeviceError err = iDeviceError(idevice_event_unsubscribe())
-    if err: raise err
+    cdef GError *err = NULL
+    idevice_event_unsubscribe(&err)
+    handle_error(err)
 
 def get_device_list():
     cdef:
@@ -106,68 +80,66 @@ def get_device_list():
         int count
         list result
         bytes device
-        iDeviceError err = iDeviceError(idevice_get_device_list(&devices, &count))
+        GError *err = NULL
 
-    if err: raise err
+    idevice_get_device_list(&devices, &count, &err)
+    handle_error(err)
 
     result = []
     for i from 0 <= i < count:
         device = devices[i]
         result.append(device)
 
-    err = iDeviceError(idevice_device_list_free(devices))
-    if err: raise err
+    idevice_device_list_free(devices)
+    #if err: raise err
     return result
 
-cdef class iDeviceConnection(Base):
+cdef class iDeviceConnection(object):
     def __init__(self, *args, **kwargs):
         raise TypeError("iDeviceConnection cannot be instantiated.  Please use iDevice.connect()")
 
     cpdef disconnect(self):
-        cdef idevice_error_t err
-        err = idevice_disconnect(self._c_connection)
-        self.handle_error(err)
+        cdef GError *error = NULL
+        idevice_disconnect(self._c_connection, &error)
+        handle_error(error)
 
-    cdef inline BaseError _error(self, int16_t ret):
-        return iDeviceError(ret)
-
-cdef class iDevice(Base):
+cdef class iDevice(object):
     def __cinit__(self, uuid=None, *args, **kwargs):
         cdef:
             char* c_uuid = NULL
-            idevice_error_t err
+            GError *err = NULL
         if uuid is not None:
             c_uuid = uuid
-        err = idevice_new(&self._c_dev, c_uuid)
-        self.handle_error(err)
+        self._c_dev = idevice_new(c_uuid, &err)
+        handle_error(err)
 
     def __dealloc__(self):
         if self._c_dev is not NULL:
-            self.handle_error(idevice_free(self._c_dev))
-
-    cdef inline BaseError _error(self, int16_t ret):
-        return iDeviceError(ret)
+            idevice_free(self._c_dev)
 
     cpdef iDeviceConnection connect(self, uint16_t port):
         cdef:
-            idevice_error_t err
+            GError *err = NULL
             iDeviceConnection conn = iDeviceConnection.__new__(iDeviceConnection)
-        err = idevice_connect(self._c_dev, port, &conn._c_connection)
-        self.handle_error(err)
+        conn._c_connection = idevice_connect(self._c_dev, port, &err)
+        handle_error(err)
         return conn
 
     property uuid:
         def __get__(self):
             cdef:
                 char* uuid
-                idevice_error_t err
-            err = idevice_get_uuid(self._c_dev, &uuid)
-            self.handle_error(err)
+                GError *err = NULL
+            uuid = idevice_get_uuid(self._c_dev, &err)
+            handle_error(err)
             return uuid
     property handle:
         def __get__(self):
-            cdef uint32_t handle
-            self.handle_error(idevice_get_handle(self._c_dev, &handle))
+            cdef:
+                uint32_t handle = 0
+                GError *error = NULL
+            handle = idevice_get_handle(self._c_dev, &error)
+            handle_error(error)
             return handle
 
 cdef extern from *:
@@ -175,43 +147,57 @@ cdef extern from *:
 
 cimport stdlib
 
-cdef class BaseService(Base):
+cdef class BaseService(object):
     __service_name__ = None
+
+cdef extern from "property_list_service.h":
+    GQuark property_list_service_error_quark()
+
+PropertyListServiceError = pyglib_register_exception_for_domain(
+    "imobiledevice.PropertyListServiceError", property_list_service_error_quark())
 
 cdef class PropertyListService(BaseService):
     cpdef send(self, plist.Node node):
-        self.handle_error(self._send(node._c_node))
+        cdef GError *err = NULL
+        self._send(node._c_node, &err)
+        handle_error(err)
 
     cpdef object receive(self):
         cdef:
             plist.plist_t c_node = NULL
-            int16_t err
-        err = self._receive(&c_node)
+            GError *err = NULL
+        c_node = self._receive(&err)
         try:
-            self.handle_error(err)
-        except BaseError, e:
+            handle_error(err)
+        except iDeviceError, e:
             if c_node != NULL:
                 plist.plist_free(c_node)
             raise
 
         return plist.plist_t_to_node(c_node)
 
-    cdef inline int16_t _send(self, plist.plist_t node):
+    cdef inline _send(self, plist.plist_t node, GError **error):
         raise NotImplementedError("send is not implemented")
 
-    cdef inline int16_t _receive(self, plist.plist_t* c_node):
+    cdef inline plist.plist_t _receive(self, GError **error):
         raise NotImplementedError("receive is not implemented")
+
+cdef extern from "device_link_service.h":
+    GQuark device_link_service_error_quark()
+
+DeviceLinkServiceError = pyglib_register_exception_for_domain(
+    "imobiledevice.DeviceLinkServiceError", device_link_service_error_quark())
 
 cdef class DeviceLinkService(PropertyListService):
     pass
 
 include "lockdown.pxi"
-include "mobilesync.pxi"
-include "notification_proxy.pxi"
-include "sbservices.pxi"
-include "mobilebackup.pxi"
-include "afc.pxi"
-include "file_relay.pxi"
-include "screenshotr.pxi"
-include "installation_proxy.pxi"
-include "mobile_image_mounter.pxi"
+#include "mobilesync.pxi"
+#include "notification_proxy.pxi"
+#include "sbservices.pxi"
+#include "mobilebackup.pxi"
+#include "afc.pxi"
+#include "file_relay.pxi"
+#include "screenshotr.pxi"
+#include "installation_proxy.pxi"
+#include "mobile_image_mounter.pxi"

@@ -1,5 +1,5 @@
 cdef extern from "libimobiledevice/lockdown.h":
-    ctypedef enum lockdownd_error_t:
+    ctypedef enum LockdowndClientErrorEnum:
         LOCKDOWN_E_SUCCESS = 0
         LOCKDOWN_E_INVALID_ARG = -1
         LOCKDOWN_E_INVALID_CONF = -2
@@ -20,53 +20,28 @@ cdef extern from "libimobiledevice/lockdown.h":
         LOCKDOWN_E_INVALID_SERVICE = -17
         LOCKDOWN_E_INVALID_ACTIVATION_RECORD = -18
         LOCKDOWN_E_UNKNOWN_ERROR = -256
+    GQuark lockdownd_client_error_quark()
 
-    lockdownd_error_t lockdownd_client_new(idevice_t device, lockdownd_client_t *client, char *label)
-    lockdownd_error_t lockdownd_client_new_with_handshake(idevice_t device, lockdownd_client_t *client, char *label)
-    lockdownd_error_t lockdownd_client_free(lockdownd_client_t client)
+    lockdownd_client_t lockdownd_client_new(idevice_t device, char *label, GError **error)
+    lockdownd_client_t lockdownd_client_new_with_handshake(idevice_t device, char *label, GError **error)
+    void lockdownd_client_free(lockdownd_client_t client, GError **error)
 
-    lockdownd_error_t lockdownd_query_type(lockdownd_client_t client, char **tp)
-    lockdownd_error_t lockdownd_get_value(lockdownd_client_t client, char *domain, char *key, plist.plist_t *value)
-    lockdownd_error_t lockdownd_set_value(lockdownd_client_t client, char *domain, char *key, plist.plist_t value)
-    lockdownd_error_t lockdownd_remove_value(lockdownd_client_t client, char *domain, char *key)
-    lockdownd_error_t lockdownd_start_service(lockdownd_client_t client, char *service, uint16_t *port)
-    lockdownd_error_t lockdownd_start_session(lockdownd_client_t client, char *host_id, char **session_id, int *ssl_enabled)
-    lockdownd_error_t lockdownd_stop_session(lockdownd_client_t client, char *session_id)
-    lockdownd_error_t lockdownd_send(lockdownd_client_t client, plist.plist_t plist)
-    lockdownd_error_t lockdownd_receive(lockdownd_client_t client, plist.plist_t *plist)
-    lockdownd_error_t lockdownd_pair(lockdownd_client_t client, lockdownd_pair_record_t pair_record)
-    lockdownd_error_t lockdownd_validate_pair(lockdownd_client_t client, lockdownd_pair_record_t pair_record)
-    lockdownd_error_t lockdownd_unpair(lockdownd_client_t client, lockdownd_pair_record_t pair_record)
-    lockdownd_error_t lockdownd_activate(lockdownd_client_t client, plist.plist_t activation_record)
-    lockdownd_error_t lockdownd_deactivate(lockdownd_client_t client)
-    lockdownd_error_t lockdownd_enter_recovery(lockdownd_client_t client)
-    lockdownd_error_t lockdownd_goodbye(lockdownd_client_t client)
-
-cdef class LockdownError(BaseError):
-    def __init__(self, *args, **kwargs):
-        self._lookup_table = {
-            LOCKDOWN_E_SUCCESS: "Success",
-            LOCKDOWN_E_INVALID_ARG: "Invalid argument",
-            LOCKDOWN_E_INVALID_CONF: "Invalid configuration",
-            LOCKDOWN_E_PLIST_ERROR: "Property list error",
-            LOCKDOWN_E_PAIRING_FAILED: "Pairing failed",
-            LOCKDOWN_E_SSL_ERROR: "SSL error",
-            LOCKDOWN_E_DICT_ERROR: "Dict error",
-            LOCKDOWN_E_START_SERVICE_FAILED: "Start service failed",
-            LOCKDOWN_E_NOT_ENOUGH_DATA: "Not enough data",
-            LOCKDOWN_E_SET_VALUE_PROHIBITED: "Set value prohibited",
-            LOCKDOWN_E_GET_VALUE_PROHIBITED: "Get value prohibited",
-            LOCKDOWN_E_REMOVE_VALUE_PROHIBITED: "Remove value prohibited",
-            LOCKDOWN_E_MUX_ERROR: "MUX Error",
-            LOCKDOWN_E_ACTIVATION_FAILED: "Activation failed",
-            LOCKDOWN_E_PASSWORD_PROTECTED: "Password protected",
-            LOCKDOWN_E_NO_RUNNING_SESSION: "No running session",
-            LOCKDOWN_E_INVALID_HOST_ID: "Invalid host ID",
-            LOCKDOWN_E_INVALID_SERVICE: "Invalid service",
-            LOCKDOWN_E_INVALID_ACTIVATION_RECORD: "Invalid activation record",
-            LOCKDOWN_E_UNKNOWN_ERROR: "Unknown error"
-        }
-        BaseError.__init__(self, *args, **kwargs)
+    char* lockdownd_query_type(lockdownd_client_t client, GError **error)
+    plist.plist_t lockdownd_get_value(lockdownd_client_t client, char *domain, char *key, GError **error)
+    void lockdownd_set_value(lockdownd_client_t client, char *domain, char *key, plist.plist_t value, GError **error)
+    void lockdownd_remove_value(lockdownd_client_t client, char *domain, char *key, GError **error)
+    uint16_t lockdownd_start_service(lockdownd_client_t client, char *service, GError **error)
+    void lockdownd_start_session(lockdownd_client_t client, char *host_id, char **session_id, int *ssl_enabled, GError **error)
+    void lockdownd_stop_session(lockdownd_client_t client, char *session_id, GError **error)
+    void lockdownd_send(lockdownd_client_t client, plist.plist_t plist, GError **error)
+    plist.plist_t lockdownd_receive(lockdownd_client_t client, GError **error)
+    void lockdownd_pair(lockdownd_client_t client, lockdownd_pair_record_t pair_record, GError **error)
+    void lockdownd_validate_pair(lockdownd_client_t client, lockdownd_pair_record_t pair_record, GError **error)
+    void lockdownd_unpair(lockdownd_client_t client, lockdownd_pair_record_t pair_record, GError **error)
+    void lockdownd_activate(lockdownd_client_t client, plist.plist_t activation_record, GError **error)
+    void lockdownd_deactivate(lockdownd_client_t client, GError **error)
+    void lockdownd_enter_recovery(lockdownd_client_t client, GError **error)
+    void lockdownd_goodbye(lockdownd_client_t client, GError **error)
 
 cdef class LockdownPairRecord:
     #def __cinit__(self, bytes device_certificate, bytes host_certificate, bytes host_id, bytes root_certificate, *args, **kwargs):
@@ -87,37 +62,41 @@ cdef class LockdownPairRecord:
             cdef bytes result = self._c_record.root_certificate
             return result
 
+LockdownClientError = pyglib_register_exception_for_domain("imobiledevice.LockdownClientError",
+    lockdownd_client_error_quark())
+
 cdef class LockdownClient(PropertyListService):
     def __cinit__(self, iDevice device not None, bytes label="", bool handshake=True, *args, **kwargs):
         cdef:
             iDevice dev = device
-            lockdownd_error_t err
+            GError *error = NULL
             char* c_label = NULL
         if label:
             c_label = label
         if handshake:
-            err = lockdownd_client_new_with_handshake(dev._c_dev, &self._c_client, c_label)
+            self._c_client = lockdownd_client_new_with_handshake(dev._c_dev, c_label, &error)
         else:
-            err = lockdownd_client_new(dev._c_dev, &self._c_client, c_label)
-        self.handle_error(err)
+            self._c_client = lockdownd_client_new(dev._c_dev, c_label, &error)
+
+        handle_error(error)
 
         self.device = dev
 
     def __dealloc__(self):
-        cdef lockdownd_error_t err
+        cdef GError *err = NULL
         if self._c_client is not NULL:
-            err = lockdownd_client_free(self._c_client)
-            self.handle_error(err)
+            lockdownd_client_free(self._c_client, &err)
+            handle_error(err)
 
     cpdef bytes query_type(self):
         cdef:
-            lockdownd_error_t err
+            GError *err = NULL
             char* c_type = NULL
             bytes result
-        err = lockdownd_query_type(self._c_client, &c_type)
+        c_type = lockdownd_query_type(self._c_client, &err)
         try:
-            self.handle_error(err)
-        except BaseError, e:
+            handle_error(err)
+        except Exception, e:
             raise
         finally:
             if c_type != NULL:
@@ -128,7 +107,7 @@ cdef class LockdownClient(PropertyListService):
 
     cpdef plist.Node get_value(self, bytes domain=None, bytes key=None):
         cdef:
-            lockdownd_error_t err
+            GError *err = NULL
             plist.plist_t c_node = NULL
             char* c_domain = NULL
             char* c_key = NULL
@@ -136,10 +115,10 @@ cdef class LockdownClient(PropertyListService):
             c_domain = domain
         if key is not None:
             c_key = key
-        err = lockdownd_get_value(self._c_client, c_domain, c_key, &c_node)
+        c_node = lockdownd_get_value(self._c_client, c_domain, c_key, &err)
         try:
-            self.handle_error(err)
-        except BaseError, e:
+            handle_error(err)
+        except Exception, e:
             if c_node != NULL:
                 plist.plist_free(c_node)
             raise
@@ -147,21 +126,27 @@ cdef class LockdownClient(PropertyListService):
         return plist.plist_t_to_node(c_node)
 
     cpdef set_value(self, bytes domain, bytes key, object value):
-        cdef plist.plist_t c_node = plist.native_to_plist_t(value)
+        cdef:
+            GError *err = NULL
+            plist.plist_t c_node = plist.native_to_plist_t(value)
+        lockdownd_set_value(self._c_client, domain, key, c_node, &err)
         try:
-            self.handle_error(lockdownd_set_value(self._c_client, domain, key, c_node))
-        except BaseError, e:
+            handle_error(err)
+        except Exception, e:
             raise
         finally:
             if c_node != NULL:
                 plist.plist_free(c_node)
 
     cpdef remove_value(self, bytes domain, bytes key):
-        self.handle_error(lockdownd_remove_value(self._c_client, domain, key))
+        cdef GError *err = NULL
+        lockdownd_remove_value(self._c_client, domain, key, &err)
+        handle_error(err)
 
     cpdef uint16_t start_service(self, object service):
         cdef:
             char* c_service_name = NULL
+            GError *err = NULL
             uint16_t port = 0
 
         if hasattr(service, '__service_name__') and \
@@ -172,10 +157,11 @@ cdef class LockdownClient(PropertyListService):
             c_service_name = <bytes>service
         else:
             raise TypeError("LockdownClient.start_service() takes a BaseService or string as its first argument")
-
+        
+        port = lockdownd_start_service(self._c_client, c_service_name, &err)
         try:
-            self.handle_error(lockdownd_start_service(self._c_client, c_service_name, &port))
-        except BaseError, e:
+            handle_error(err)
+        except Exception, e:
             raise
 
         return port
@@ -195,14 +181,14 @@ cdef class LockdownClient(PropertyListService):
 
     cpdef tuple start_session(self, bytes host_id):
         cdef:
-            lockdownd_error_t err
+            GError *err = NULL
             char* c_session_id = NULL
             bint ssl_enabled
             bytes session_id
-        err = lockdownd_start_session(self._c_client, host_id, &c_session_id, &ssl_enabled)
+        lockdownd_start_session(self._c_client, host_id, &c_session_id, &ssl_enabled, &err)
         try:
-            self.handle_error(err)
-        except BaseError, e:
+            handle_error(err)
+        except Exception, e:
             raise
         finally:
             if c_session_id != NULL:
@@ -212,43 +198,59 @@ cdef class LockdownClient(PropertyListService):
         return (session_id, ssl_enabled)
 
     cpdef stop_session(self, bytes session_id):
-        self.handle_error(lockdownd_stop_session(self._c_client, session_id))
+        cdef GError *err = NULL
+        lockdownd_stop_session(self._c_client, session_id, &err)
+        handle_error(err)
 
     cpdef pair(self, object pair_record=None):
-        cdef lockdownd_pair_record_t c_pair_record = NULL
+        cdef:
+            lockdownd_pair_record_t c_pair_record = NULL
+            GError *err = NULL
         if pair_record is not None:
             c_pair_record = (<LockdownPairRecord>pair_record)._c_record
-        self.handle_error(lockdownd_pair(self._c_client, c_pair_record))
+        lockdownd_pair(self._c_client, c_pair_record, &err)
+        handle_error(err)
 
     cpdef validate_pair(self, object pair_record=None):
-        cdef lockdownd_pair_record_t c_pair_record = NULL
+        cdef:
+            lockdownd_pair_record_t c_pair_record = NULL
+            GError *err = NULL
         if pair_record is not None:
             c_pair_record = (<LockdownPairRecord>pair_record)._c_record
-        self.handle_error(lockdownd_validate_pair(self._c_client, c_pair_record))
+        lockdownd_validate_pair(self._c_client, c_pair_record, &err)
+        handle_error(err)
 
     cpdef unpair(self, object pair_record=None):
-        cdef lockdownd_pair_record_t c_pair_record = NULL
+        cdef:
+            lockdownd_pair_record_t c_pair_record = NULL
+            GError *err = NULL
         if pair_record is not None:
             c_pair_record = (<LockdownPairRecord>pair_record)._c_record
-        self.handle_error(lockdownd_unpair(self._c_client, c_pair_record))
+        lockdownd_unpair(self._c_client, c_pair_record, &err)
+        handle_error(err)
 
     cpdef activate(self, plist.Node activation_record):
-        self.handle_error(lockdownd_activate(self._c_client, activation_record._c_node))
+        cdef GError *err = NULL
+        lockdownd_activate(self._c_client, activation_record._c_node, &err)
+        handle_error(err)
 
     cpdef deactivate(self):
-        self.handle_error(lockdownd_deactivate(self._c_client))
+        cdef GError *err = NULL
+        lockdownd_deactivate(self._c_client, &err)
+        handle_error(err)
 
     cpdef enter_recovery(self):
-        self.handle_error(lockdownd_enter_recovery(self._c_client))
+        cdef GError *err = NULL
+        lockdownd_enter_recovery(self._c_client, &err)
+        handle_error(err)
 
     cpdef goodbye(self):
-        self.handle_error(lockdownd_goodbye(self._c_client))
+        cdef GError *err = NULL
+        lockdownd_goodbye(self._c_client, &err)
+        handle_error(err)
 
-    cdef inline int16_t _send(self, plist.plist_t node):
-        return lockdownd_send(self._c_client, node)
+    cdef inline _send(self, plist.plist_t node, GError **err):
+        lockdownd_send(self._c_client, node, err)
 
-    cdef inline int16_t _receive(self, plist.plist_t* node):
-        return lockdownd_receive(self._c_client, node)
-
-    cdef inline BaseError _error(self, int16_t ret):
-        return LockdownError(ret)
+    cdef inline plist.plist_t _receive(self, GError **err):
+        return lockdownd_receive(self._c_client, err)
