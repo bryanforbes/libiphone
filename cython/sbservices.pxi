@@ -2,71 +2,67 @@ cdef extern from "libimobiledevice/sbservices.h":
     cdef struct sbservices_client_private:
         pass
     ctypedef sbservices_client_private *sbservices_client_t
-    ctypedef enum sbservices_error_t:
+    ctypedef enum SBServicesClientErrorEnum:
         SBSERVICES_E_SUCCESS = 0
         SBSERVICES_E_INVALID_ARG = -1
         SBSERVICES_E_PLIST_ERROR = -2
         SBSERVICES_E_CONN_FAILED = -3
         SBSERVICES_E_UNKNOWN_ERROR = -256
-    sbservices_error_t sbservices_client_new(idevice_t device, uint16_t port, sbservices_client_t *client)
-    sbservices_error_t sbservices_client_free(sbservices_client_t client)
-    sbservices_error_t sbservices_get_icon_state(sbservices_client_t client, plist.plist_t *state)
-    sbservices_error_t sbservices_set_icon_state(sbservices_client_t client, plist.plist_t newstate)
-    sbservices_error_t sbservices_get_icon_pngdata(sbservices_client_t client, char *bundleId, char **pngdata, uint64_t *pngsize)
+    GQuark sbservices_client_error_quark()
 
-cdef class SpringboardServicesError(BaseError):
-    def __init__(self, *args, **kwargs):
-        self._lookup_table = {
-            SBSERVICES_E_SUCCESS: "Success",
-            SBSERVICES_E_INVALID_ARG: "Invalid argument",
-            SBSERVICES_E_PLIST_ERROR: "Property list error",
-            SBSERVICES_E_CONN_FAILED: "Connection failed",
-            SBSERVICES_E_UNKNOWN_ERROR: "Unknown error"
-        }
-        BaseError.__init__(self, *args, **kwargs)
+    sbservices_client_t sbservices_client_new(idevice_t device, uint16_t port, GError **error)
+    void sbservices_client_free(sbservices_client_t client, GError **error)
+    plist.plist_t sbservices_get_icon_state(sbservices_client_t client, GError **error)
+    void sbservices_set_icon_state(sbservices_client_t client, plist.plist_t newstate, GError **error)
+    void sbservices_get_icon_pngdata(sbservices_client_t client, char *bundleId, char **pngdata, uint64_t *pngsize, GError **error)
 
-cdef class SpringboardServicesClient(Base):
+SpringboardServicesClientError = pyglib_register_exception_for_domain("imobiledevice.SpringboardServicesClientError",
+    sbservices_client_error_quark())
+
+cdef class SpringboardServicesClient(PropertyListService):
     __service_name__ = "com.apple.springboardservices"
     cdef sbservices_client_t _c_client
 
     def __cinit__(self, iDevice device not None, int port, *args, **kwargs):
-        cdef:
-            iDevice dev = device
-        self.handle_error(sbservices_client_new(dev._c_dev, port, &self._c_client))
+        cdef GError *err = NULL
+        self._c_client = sbservices_client_new(device._c_dev, port, &err)
+        handle_error(err)
     
     def __dealloc__(self):
+        cdef GError *err = NULL
         if self._c_client is not NULL:
-            err = SpringboardServicesError(sbservices_client_free(self._c_client))
-            if err: raise err
-
-    cdef inline BaseError _error(self, int16_t ret):
-        return SpringboardServicesError(ret)
+            sbservices_client_free(self._c_client, &err)
+            handle_error(err)
 
     property icon_state:
         def __get__(self):
             cdef:
                 plist.plist_t c_node = NULL
-                sbservices_error_t err
-            err = sbservices_get_icon_state(self._c_client, &c_node)
+                GError *err = NULL
+            c_node = sbservices_get_icon_state(self._c_client, &err)
             try:
-                self.handle_error(err)
-            except BaseError, e:
+                handle_error(err)
+
+                return plist.plist_t_to_node(c_node)
+            except Exception, e:
                 if c_node != NULL:
                     plist.plist_free(c_node)
                 raise
-            return plist.plist_t_to_node(c_node)
         def __set__(self, plist.Node newstate not None):
-            self.handle_error(sbservices_set_icon_state(self._c_client, newstate._c_node))
+            cdef GError *err = NULL
+            sbservices_set_icon_state(self._c_client, newstate._c_node, &err)
+            handle_error(err)
 
     cpdef bytes get_pngdata(self, bytes bundleId):
         cdef:
             char* pngdata = NULL
             uint64_t pngsize
-            sbservices_error_t err
-        err = sbservices_get_icon_pngdata(self._c_client, bundleId, &pngdata, &pngsize)
+            GError *err = NULL
+        sbservices_get_icon_pngdata(self._c_client, bundleId, &pngdata, &pngsize, &err)
         try:
-            self.handle_error(err)
-        except BaseError, e:
+            handle_error(err)
+
+            return pngdata[:pngsize]
+        except Exception, e:
             stdlib.free(pngdata)
             raise
-        return pngdata[:pngsize]

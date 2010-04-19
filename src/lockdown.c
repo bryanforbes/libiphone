@@ -684,10 +684,7 @@ lockdownd_client_t lockdownd_client_new_with_handshake(idevice_t device, const c
 			free(type);
 	}
 
-	client_loc->uuid = idevice_get_uuid(device, &tmp_err);
-	if (tmp_err != NULL) {
-		debug_info("failed to get device uuid.");
-	}
+	client_loc->uuid = idevice_get_uuid(device);
 	debug_info("device uuid: %s", client_loc->uuid);
 
 	userpref_get_host_id(&host_id);

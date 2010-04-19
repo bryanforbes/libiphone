@@ -96,14 +96,14 @@ cdef class LockdownClient(PropertyListService):
         c_type = lockdownd_query_type(self._c_client, &err)
         try:
             handle_error(err)
+
+            result = c_type
+            return result
         except Exception, e:
             raise
         finally:
             if c_type != NULL:
-                result = c_type
                 stdlib.free(c_type)
-
-        return result
 
     cpdef plist.Node get_value(self, bytes domain=None, bytes key=None):
         cdef:
@@ -118,12 +118,12 @@ cdef class LockdownClient(PropertyListService):
         c_node = lockdownd_get_value(self._c_client, c_domain, c_key, &err)
         try:
             handle_error(err)
+
+            return plist.plist_t_to_node(c_node)
         except Exception, e:
             if c_node != NULL:
                 plist.plist_free(c_node)
             raise
-
-        return plist.plist_t_to_node(c_node)
 
     cpdef set_value(self, bytes domain, bytes key, object value):
         cdef:
@@ -188,14 +188,14 @@ cdef class LockdownClient(PropertyListService):
         lockdownd_start_session(self._c_client, host_id, &c_session_id, &ssl_enabled, &err)
         try:
             handle_error(err)
+
+            session_id = c_session_id
+            return (session_id, ssl_enabled)
         except Exception, e:
             raise
         finally:
             if c_session_id != NULL:
-                session_id = c_session_id
                 stdlib.free(c_session_id)
-
-        return (session_id, ssl_enabled)
 
     cpdef stop_session(self, bytes session_id):
         cdef GError *err = NULL

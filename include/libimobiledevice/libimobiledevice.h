@@ -100,7 +100,7 @@ void idevice_connection_receive(idevice_connection_t connection, char *data, uin
 
 /* misc */
 uint32_t idevice_get_handle(idevice_t device, GError **error);
-char* idevice_get_uuid(idevice_t device, GError **error);
+char* idevice_get_uuid(idevice_t device);
 
 #ifdef __cplusplus
 }

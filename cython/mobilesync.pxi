@@ -3,7 +3,7 @@ cdef extern from "libimobiledevice/mobilesync.h":
         pass
     ctypedef mobilesync_client_private *mobilesync_client_t
 
-    ctypedef enum mobilesync_error_t:
+    ctypedef enum MobileSyncErrorEnum:
         MOBILESYNC_E_SUCCESS = 0
         MOBILESYNC_E_INVALID_ARG = -1
         MOBILESYNC_E_PLIST_ERROR = -2
@@ -11,22 +11,14 @@ cdef extern from "libimobiledevice/mobilesync.h":
         MOBILESYNC_E_BAD_VERSION = -4
         MOBILESYNC_E_UNKNOWN_ERROR = -256
 
-    mobilesync_error_t mobilesync_client_new(idevice_t device, uint16_t port, mobilesync_client_t * client)
-    mobilesync_error_t mobilesync_client_free(mobilesync_client_t client)
-    mobilesync_error_t mobilesync_receive(mobilesync_client_t client, plist.plist_t *plist)
-    mobilesync_error_t mobilesync_send(mobilesync_client_t client, plist.plist_t plist)
+    GQuark mobilesync_client_error_quark()
+    mobilesync_client_t mobilesync_client_new(idevice_t device, uint16_t port, GError **error)
+    void mobilesync_client_free(mobilesync_client_t client, GError **error)
+    plist.plist_t mobilesync_receive(mobilesync_client_t client, GError **error)
+    void mobilesync_send(mobilesync_client_t client, plist.plist_t plist, GError **error)
 
-cdef class MobileSyncError(BaseError):
-    def __init__(self, *args, **kwargs):
-        self._lookup_table = {
-            MOBILESYNC_E_SUCCESS: "Success",
-            MOBILESYNC_E_INVALID_ARG: "Invalid argument",
-            MOBILESYNC_E_PLIST_ERROR: "Property list error",
-            MOBILESYNC_E_MUX_ERROR: "MUX error",
-            MOBILESYNC_E_BAD_VERSION: "Bad version",
-            MOBILESYNC_E_UNKNOWN_ERROR: "Unknown error"
-        }
-        BaseError.__init__(self, *args, **kwargs)
+MobileSyncClientError = pyglib_register_exception_for_domain("imobiledevice.MobileSyncClientError",
+    mobilesync_client_error_quark())
 
 cdef class MobileSyncClient(DeviceLinkService):
     __service_name__ = "com.apple.mobilesync"
@@ -34,22 +26,18 @@ cdef class MobileSyncClient(DeviceLinkService):
 
     def __cinit__(self, iDevice device not None, int port, *args, **kwargs):
         cdef:
-            iDevice dev = device
-            mobilesync_error_t err
-        err = mobilesync_client_new(dev._c_dev, port, &(self._c_client))
-        self.handle_error(err)
+            GError *err = NULL
+        self._c_client = mobilesync_client_new(device._c_dev, port, &err)
+        handle_error(err)
     
     def __dealloc__(self):
-        cdef mobilesync_error_t err
+        cdef GError *err = NULL
         if self._c_client is not NULL:
-            err = mobilesync_client_free(self._c_client)
-            self.handle_error(err)
+            mobilesync_client_free(self._c_client, &err)
+            handle_error(err)
     
-    cdef inline int16_t _send(self, plist.plist_t node):
-        return mobilesync_send(self._c_client, node)
+    cdef inline _send(self, plist.plist_t node, GError **error):
+        mobilesync_send(self._c_client, node, error)
 
-    cdef inline int16_t _receive(self, plist.plist_t* node):
-        return mobilesync_receive(self._c_client, node)
-
-    cdef inline BaseError _error(self, int16_t ret):
-        return MobileSyncError(ret)
+    cdef inline plist.plist_t _receive(self, GError **error):
+        return mobilesync_receive(self._c_client, error)

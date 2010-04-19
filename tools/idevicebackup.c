@@ -111,7 +111,7 @@ static plist_t mobilebackup_factory_info_plist_new()
 	plist_dict_insert_item(ret, "Serial Number", plist_copy(value_node));
 
 	value_node = plist_dict_get_item(root_node, "UniqueDeviceID");
-	uuid = idevice_get_uuid(phone, NULL);
+	uuid = idevice_get_uuid(phone);
 	plist_dict_insert_item(ret, "Target Identifier", plist_new_string(uuid));
 
 	/* uppercase */

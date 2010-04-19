@@ -472,7 +472,7 @@ uint32_t idevice_get_handle(idevice_t device, GError **error)
 /**
  * Gets the unique id for the device.
  */
-char* idevice_get_uuid(idevice_t device, GError **error)
+char* idevice_get_uuid(idevice_t device)
 {
 	g_assert(device != NULL);
 

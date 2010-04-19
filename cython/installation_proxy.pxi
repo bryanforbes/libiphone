@@ -4,7 +4,7 @@ cdef extern from "libimobiledevice/installation_proxy.h":
     ctypedef instproxy_client_private *instproxy_client_t
     ctypedef void (*instproxy_status_cb_t) (const_char_ptr operation, plist.plist_t status, void *user_data)
 
-    ctypedef enum instproxy_error_t:
+    ctypedef enum InstProxyClientErrorEnum:
         INSTPROXY_E_SUCCESS = 0
         INSTPROXY_E_INVALID_ARG = -1
         INSTPROXY_E_PLIST_ERROR = -2
@@ -13,193 +13,191 @@ cdef extern from "libimobiledevice/installation_proxy.h":
         INSTPROXY_E_OP_FAILED = -5
         INSTPROXY_E_UNKNOWN_ERROR = -256
 
-    instproxy_error_t instproxy_client_new(idevice_t device, uint16_t port, instproxy_client_t *client)
-    instproxy_error_t instproxy_client_free(instproxy_client_t client)
+    GQuark instproxy_client_error_quark()
+    instproxy_client_t instproxy_client_new(idevice_t device, uint16_t port, GError **error)
+    void instproxy_client_free(instproxy_client_t client, GError **error)
 
-    instproxy_error_t instproxy_browse(instproxy_client_t client, plist.plist_t client_options, plist.plist_t *result)
-    instproxy_error_t instproxy_install(instproxy_client_t client, char *pkg_path, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data)
-    instproxy_error_t instproxy_upgrade(instproxy_client_t client, char *pkg_path, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data)
-    instproxy_error_t instproxy_uninstall(instproxy_client_t client, char *appid, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data)
+    plist.plist_t instproxy_browse(instproxy_client_t client, plist.plist_t client_options, GError **error)
+    void instproxy_install(instproxy_client_t client, char *pkg_path, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data, GError **error)
+    void instproxy_upgrade(instproxy_client_t client, char *pkg_path, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data, GError **error)
+    void instproxy_uninstall(instproxy_client_t client, char *appid, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data, GError **error)
 
-    instproxy_error_t instproxy_lookup_archives(instproxy_client_t client, plist.plist_t client_options, plist.plist_t *result)
-    instproxy_error_t instproxy_archive(instproxy_client_t client, char *appid, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data)
-    instproxy_error_t instproxy_restore(instproxy_client_t client, char *appid, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data)
-    instproxy_error_t instproxy_remove_archive(instproxy_client_t client, char *appid, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data)
+    plist.plist_t instproxy_lookup_archives(instproxy_client_t client, plist.plist_t client_options, GError **error)
+    void instproxy_archive(instproxy_client_t client, char *appid, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data, GError **error)
+    void instproxy_restore(instproxy_client_t client, char *appid, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data, GError **error)
+    void instproxy_remove_archive(instproxy_client_t client, char *appid, plist.plist_t client_options, instproxy_status_cb_t status_cb, void *user_data, GError **error)
 
 cdef void instproxy_notify_cb(const_char_ptr operation, plist.plist_t status, void *py_callback) with gil:
     (<object>py_callback)(operation, plist.plist_t_to_node(status, False))
 
-cdef class InstallationProxyError(BaseError):
-    def __init__(self, *args, **kwargs):
-        self._lookup_table = {
-            INSTPROXY_E_SUCCESS: "Success",
-            INSTPROXY_E_INVALID_ARG: "Invalid argument",
-            INSTPROXY_E_PLIST_ERROR: "Property list error",
-            INSTPROXY_E_CONN_FAILED: "Connection failed",
-            INSTPROXY_E_OP_IN_PROGRESS: "Operation in progress",
-            INSTPROXY_E_OP_FAILED: "Operation failed",
-            INSTPROXY_E_UNKNOWN_ERROR: "Unknown error"
-        }
-        BaseError.__init__(self, *args, **kwargs)
+InstallationProxyClientError = pyglib_register_exception_for_domain(
+    "imobiledevice.InstallationProxyClientError", instproxy_client_error_quark())
 
-cdef class InstallationProxy(Base):
+cdef class InstallationProxyClient(PropertyListService):
     __service_name__ = "com.apple.mobile.installation_proxy"
     cdef instproxy_client_t _c_client
 
     def __cinit__(self, iDevice device not None, int port, *args, **kwargs):
-        cdef:
-            iDevice dev = device
-            instproxy_error_t err
-        err = instproxy_client_new(dev._c_dev, port, &self._c_client)
-        self.handle_error(err)
+        cdef GError *err = NULL
+        self._c_client = instproxy_client_new(device._c_dev, port, &err)
+        handle_error(err)
 
     def __dealloc__(self):
-        cdef instproxy_error_t err
+        cdef GError *err = NULL
         if self._c_client is not NULL:
-            err = instproxy_client_free(self._c_client)
-            self.handle_error(err)
+            instproxy_client_free(self._c_client, &err)
+            handle_error(err)
 
     cpdef plist.Node browse(self, object client_options):
         cdef:
             plist.Node options
             plist.plist_t c_options
             plist.plist_t c_result = NULL
-            instproxy_error_t err
+            bint do_free = 0
+            GError *err = NULL
         if isinstance(client_options, plist.Dict):
             options = client_options
             c_options = options._c_node
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
+            do_free = 1
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
-        err = instproxy_browse(self._c_client, c_options, &c_result)
-        self.handle_error(err)
+            raise TypeError("Must pass a plist.Dict or dict to browse")
+        c_result = instproxy_browse(self._c_client, c_options, &err)
+
+        try:
+            handle_error(err)
+        except Exception, e:
+            if do_free:
+                plist.plist_free(c_options)
+
         return plist.plist_t_to_node(c_result)
 
     cpdef install(self, bytes pkg_path, object client_options, object callback=None):
         cdef:
             plist.Node options
             plist.plist_t c_options
-            instproxy_error_t err
+            GError *err = NULL
         if isinstance(client_options, plist.Dict):
             options = client_options
             c_options = options._c_node
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise TypeError("Must pass a plist.Dict or dict to browse")
         if callback is None:
-            err = instproxy_install(self._c_client, pkg_path, options._c_node, NULL, NULL)
+            instproxy_install(self._c_client, pkg_path, options._c_node, NULL, NULL, &err)
         else:
-            err = instproxy_install(self._c_client, pkg_path, options._c_node, instproxy_notify_cb, <void*>callback)
-        self.handle_error(err)
+            instproxy_install(self._c_client, pkg_path, options._c_node, instproxy_notify_cb, <void*>callback, &err)
+        handle_error(err)
 
     cpdef upgrade(self, bytes pkg_path, object client_options, object callback=None):
         cdef:
             plist.Node options
             plist.plist_t c_options
-            instproxy_error_t err
+            GError *err = NULL
         if isinstance(client_options, plist.Dict):
             options = client_options
             c_options = options._c_node
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise TypeError("Must pass a plist.Dict or dict to browse")
         if callback is None:
-            err = instproxy_upgrade(self._c_client, pkg_path, options._c_node, NULL, NULL)
+            instproxy_upgrade(self._c_client, pkg_path, options._c_node, NULL, NULL, &err)
         else:
-            err = instproxy_upgrade(self._c_client, pkg_path, options._c_node, instproxy_notify_cb, <void*>callback)
-        self.handle_error(err)
+            instproxy_upgrade(self._c_client, pkg_path, options._c_node, instproxy_notify_cb, <void*>callback, &err)
+        handle_error(err)
 
     cpdef uninstall(self, bytes appid, object client_options, object callback=None):
         cdef:
             plist.Node options
             plist.plist_t c_options
-            instproxy_error_t err
+            GError *err = NULL
         if isinstance(client_options, plist.Dict):
             options = client_options
             c_options = options._c_node
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise TypeError("Must pass a plist.Dict or dict to browse")
         if callback is None:
-            err = instproxy_uninstall(self._c_client, appid, options._c_node, NULL, NULL)
+            instproxy_uninstall(self._c_client, appid, options._c_node, NULL, NULL, &err)
         else:
-            err = instproxy_uninstall(self._c_client, appid, options._c_node, instproxy_notify_cb, <void*>callback)
-        self.handle_error(err)
+            instproxy_uninstall(self._c_client, appid, options._c_node, instproxy_notify_cb, <void*>callback, &err)
+        handle_error(err)
 
     cpdef plist.Node lookup_archives(self, object client_options):
         cdef:
             plist.Node options
             plist.plist_t c_options
             plist.plist_t c_node = NULL
-            instproxy_error_t err
+            GError *err = NULL
         if isinstance(client_options, plist.Dict):
             options = client_options
             c_options = options._c_node
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
-        err = instproxy_lookup_archives(self._c_client, options._c_node, &c_node)
-        self.handle_error(err)
+            raise TypeError("Must pass a plist.Dict or dict to browse")
+        c_node = instproxy_lookup_archives(self._c_client, options._c_node, &err)
+        try:
+            handle_error(err)
+        except Exception, e:
+            if c_node != NULL:
+                plist.plist_free(c_node)
         return plist.plist_t_to_node(c_node)
 
     cpdef archive(self, bytes appid, object client_options, object callback=None):
         cdef:
             plist.Node options
             plist.plist_t c_options
-            instproxy_error_t err
+            GError *err = NULL
         if isinstance(client_options, plist.Dict):
             options = client_options
             c_options = options._c_node
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise TypeError("Must pass a plist.Dict or dict to browse")
         if callback is None:
-            err = instproxy_archive(self._c_client, appid, options._c_node, NULL, NULL)
+            instproxy_archive(self._c_client, appid, options._c_node, NULL, NULL, &err)
         else:
-            err = instproxy_archive(self._c_client, appid, options._c_node, instproxy_notify_cb, <void*>callback)
-        self.handle_error(err)
+            instproxy_archive(self._c_client, appid, options._c_node, instproxy_notify_cb, <void*>callback, &err)
+        handle_error(err)
 
     cpdef restore(self, bytes appid, object client_options, object callback=None):
         cdef:
             plist.Node options
             plist.plist_t c_options
-            instproxy_error_t err
+            GError *err = NULL
         if isinstance(client_options, plist.Dict):
             options = client_options
             c_options = options._c_node
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise TypeError("Must pass a plist.Dict or dict to browse")
         if callback is None:
-            err = instproxy_restore(self._c_client, appid, options._c_node, NULL, NULL)
+            instproxy_restore(self._c_client, appid, options._c_node, NULL, NULL, &err)
         else:
-            err = instproxy_restore(self._c_client, appid, options._c_node, instproxy_notify_cb, <void*>callback)
-        self.handle_error(err)
+            instproxy_restore(self._c_client, appid, options._c_node, instproxy_notify_cb, <void*>callback, &err)
+        handle_error(err)
 
     cpdef remove_archive(self, bytes appid, object client_options, object callback=None):
         cdef:
             plist.Node options
             plist.plist_t c_options
-            instproxy_error_t err
+            GError *err = NULL
         if isinstance(client_options, plist.Dict):
             options = client_options
             c_options = options._c_node
         elif isinstance(client_options, dict):
             c_options = plist.native_to_plist_t(client_options)
         else:
-            raise InstallationProxyError(INSTPROXY_E_INVALID_ARG)
+            raise TypeError("Must pass a plist.Dict or dict to browse")
         if callback is None:
-            err = instproxy_remove_archive(self._c_client, appid, options._c_node, NULL, NULL)
+            instproxy_remove_archive(self._c_client, appid, options._c_node, NULL, NULL, &err)
         else:
-            err = instproxy_remove_archive(self._c_client, appid, options._c_node, instproxy_notify_cb, <void*>callback)
-        self.handle_error(err)
-
-    cdef inline BaseError _error(self, int16_t ret):
-        return InstallationProxyError(ret)
+            instproxy_remove_archive(self._c_client, appid, options._c_node, instproxy_notify_cb, <void*>callback, &err)
+        handle_error(err)

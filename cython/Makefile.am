@@ -11,6 +11,7 @@ PYGLIBCFLAGS = -I`pkg-config pygobject-2.0 --variable=pygtkincludedir`
 PYGLIBLDFLAGS = -lpyglib-2.0-python$(PYTHON_VERSION)
 PXIINCLUDES =					\
 	stdint.pxi					\
+	glib.pxi					\
 	lockdown.pxi				\
 	mobilesync.pxi				\
 	notification_proxy.pxi		\

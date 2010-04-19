@@ -30,7 +30,7 @@ cdef extern from "libimobiledevice/libimobiledevice.h":
     void idevice_connection_receive(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, GError **error)
 
     uint32_t idevice_get_handle(idevice_t device, GError **error)
-    char* idevice_get_uuid(idevice_t device, GError **error)
+    char* idevice_get_uuid(idevice_t device)
 
 iDeviceError = pyglib_register_exception_for_domain("imobiledevice.iDeviceError", idevice_error_quark())
 
@@ -83,16 +83,18 @@ def get_device_list():
         GError *err = NULL
 
     idevice_get_device_list(&devices, &count, &err)
-    handle_error(err)
+    try:
+        handle_error(err)
 
-    result = []
-    for i from 0 <= i < count:
-        device = devices[i]
-        result.append(device)
+        result = []
+        for i from 0 <= i < count:
+            device = devices[i]
+            result.append(device)
 
-    idevice_device_list_free(devices)
-    #if err: raise err
-    return result
+        return result
+    finally:
+        if devices != NULL:
+            idevice_device_list_free(devices)
 
 cdef class iDeviceConnection(object):
     def __init__(self, *args, **kwargs):
@@ -120,18 +122,22 @@ cdef class iDevice(object):
     cpdef iDeviceConnection connect(self, uint16_t port):
         cdef:
             GError *err = NULL
-            iDeviceConnection conn = iDeviceConnection.__new__(iDeviceConnection)
-        conn._c_connection = idevice_connect(self._c_dev, port, &err)
+            idevice_connection_t c_conn = NULL
+            iDeviceConnection conn
+
+        c_conn = idevice_connect(self._c_dev, port, &err)
         handle_error(err)
+
+        conn = iDeviceConnection.__new__(iDeviceConnection)
+        conn._c_connection = c_conn
+
         return conn
 
     property uuid:
         def __get__(self):
             cdef:
                 char* uuid
-                GError *err = NULL
-            uuid = idevice_get_uuid(self._c_dev, &err)
-            handle_error(err)
+            uuid = idevice_get_uuid(self._c_dev)
             return uuid
     property handle:
         def __get__(self):
@@ -169,7 +175,7 @@ cdef class PropertyListService(BaseService):
         c_node = self._receive(&err)
         try:
             handle_error(err)
-        except iDeviceError, e:
+        except Exception, e:
             if c_node != NULL:
                 plist.plist_free(c_node)
             raise
@@ -192,12 +198,12 @@ cdef class DeviceLinkService(PropertyListService):
     pass
 
 include "lockdown.pxi"
-#include "mobilesync.pxi"
-#include "notification_proxy.pxi"
-#include "sbservices.pxi"
-#include "mobilebackup.pxi"
-#include "afc.pxi"
-#include "file_relay.pxi"
-#include "screenshotr.pxi"
-#include "installation_proxy.pxi"
-#include "mobile_image_mounter.pxi"
+include "mobilesync.pxi"
+include "notification_proxy.pxi"
+include "sbservices.pxi"
+include "mobilebackup.pxi"
+include "afc.pxi"
+include "file_relay.pxi"
+include "screenshotr.pxi"
+include "installation_proxy.pxi"
+include "mobile_image_mounter.pxi"
