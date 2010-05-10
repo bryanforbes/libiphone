@@ -28,6 +28,7 @@ extern "C" {
 #endif
 
 #include <libimobiledevice/libimobiledevice.h>
+#include <time.h>
 
 /** @name Error Codes */
 /*@{*/
@@ -36,9 +37,17 @@ extern "C" {
 #define MOBILESYNC_E_PLIST_ERROR           -2
 #define MOBILESYNC_E_MUX_ERROR             -3
 #define MOBILESYNC_E_BAD_VERSION           -4
+#define MOBILESYNC_E_SYNC_REFUSED          -5
+#define MOBILESYNC_E_CANCELLED             -6
 
 #define MOBILESYNC_E_UNKNOWN_ERROR       -256
 /*@}*/
+
+typedef enum {
+	MOBILESYNC_SYNC_TYPE_FAST,
+	MOBILESYNC_SYNC_TYPE_SLOW,
+	MOBILESYNC_SYNC_TYPE_RESET
+} mobilesync_sync_type_t;
 
 /** Represents an error code. */
 typedef int16_t mobilesync_error_t;
@@ -46,10 +55,29 @@ typedef int16_t mobilesync_error_t;
 typedef struct mobilesync_client_private mobilesync_client_private;
 typedef mobilesync_client_private *mobilesync_client_t; /**< The client handle */
 
+typedef struct {
+	char *device_anchor;
+	char *host_anchor;
+	int version;
+} mobilesync_anchor_exchange;
+typedef mobilesync_anchor_exchange *mobilesync_anchor_exchange_t;
+
+typedef char* (*mobilesync_process_device_changes_cb_t) (const char* data_class, plist_t entity_mapping, uint8_t more_changes, void *user_data);
+typedef char* (*mobilesync_process_device_remapping_cb_t) (const char* data_class, plist_t entity_remapping, void *user_data);
+
 mobilesync_error_t mobilesync_client_new(idevice_t device, uint16_t port, mobilesync_client_t * client);
 mobilesync_error_t mobilesync_client_free(mobilesync_client_t client);
 mobilesync_error_t mobilesync_receive(mobilesync_client_t client, plist_t *plist);
 mobilesync_error_t mobilesync_send(mobilesync_client_t client, plist_t plist);
+
+mobilesync_error_t mobilesync_start_session(mobilesync_client_t client, const char* data_class, mobilesync_anchor_exchange_t anchor_exchange, mobilesync_sync_type_t* sync_type);
+mobilesync_error_t mobilesync_finish_session(mobilesync_client_t client, const char* data_class);
+
+mobilesync_error_t mobilesync_get_all_records(mobilesync_client_t client, const char* data_class, mobilesync_process_device_changes_cb_t process_changes_cb, void *user_data);
+mobilesync_error_t mobilesync_get_changed_records(mobilesync_client_t client, const char* data_class, mobilesync_process_device_changes_cb_t process_changes_cb, void *user_data);
+mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, const char* data_class, plist_t *changes, mobilesync_process_device_remapping_cb_t process_remapping_cb, void *user_data);
+
+mobilesync_error_t mobilesync_cancel(mobilesync_client_t client, const char* data_class, const char* reason);
 
 #ifdef __cplusplus
 }
