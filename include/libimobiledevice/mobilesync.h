@@ -74,24 +74,24 @@ mobilesync_error_t mobilesync_session_finish(mobilesync_client_t client);
 /* receive */
 mobilesync_error_t mobilesync_get_all_records_from_device(mobilesync_client_t client);
 mobilesync_error_t mobilesync_get_changes_from_device(mobilesync_client_t client);
-mobilesync_error_t mobilesync_receive_changes(mobilesync_client_t client, plist_t *entities, uint8_t *more_changes);
+mobilesync_error_t mobilesync_receive_changes(mobilesync_client_t client, plist_t *entities, uint8_t *is_last_record);
 mobilesync_error_t mobilesync_acknowledge_changes_from_device(mobilesync_client_t client);
 
 /* send */
 mobilesync_error_t mobilesync_ready_to_send_changes_from_computer(mobilesync_client_t client);
-mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, plist_t changes, uint8_t is_last_record, plist_t client_options);
+mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, plist_t changes, uint8_t is_last_record, plist_t actions);
 mobilesync_error_t mobilesync_receive_remapping(mobilesync_client_t client, plist_t *remapping);
 
 /* cancel */
-mobilesync_error_t mobilesync_cancel(mobilesync_client_t client, const char* reason);
+mobilesync_error_t mobilesync_session_cancel(mobilesync_client_t client, const char* reason);
 
 /* helpers */
 mobilesync_anchors_t mobilesync_anchors_new(const char *device_anchor, const char *computer_anchor);
 void mobilesync_anchors_free(mobilesync_anchors_t anchors);
 
-plist_t mobilesync_client_options_new();
-void mobilesync_client_options_add(plist_t client_options, ...) G_GNUC_NULL_TERMINATED;
-void mobilesync_client_options_free(plist_t client_options);
+plist_t mobilesync_actions_new();
+void mobilesync_actions_add(plist_t actions, ...) G_GNUC_NULL_TERMINATED;
+void mobilesync_actions_free(plist_t actions);
 
 #ifdef __cplusplus
 }

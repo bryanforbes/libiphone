@@ -83,8 +83,6 @@ static mobilesync_error_t mobilesync_get_all_contacts(mobilesync_client_t client
 		plist_free(records);
 		records = NULL;
 
-		printf("%s\n", client->data_class);
-
 		ret = mobilesync_acknowledge_changes_from_device(client);
 		if (ret != MOBILESYNC_E_SUCCESS) {
 			goto out;
@@ -98,7 +96,11 @@ static mobilesync_error_t mobilesync_get_all_contacts(mobilesync_client_t client
 	}
 
 	for (i = 0; i < number_of_changed; i++) {
-		err = mobilesync_send_changes(client, changes[i], i == (number_of_changed - 1) ? 0 : 1, client_options);
+		plist_t actions = mobilesync_actions_new();
+		mobilesync_actions_add(actions, "SyncDeviceLinkEntityNamesKey", [entity_type], 1,
+			"SyncDeviceLinkAllRecordsOfPulledEntityTypeSentKey", 1, NULL);
+		err = mobilesync_send_changes(client, changes[i], i == (number_of_changed - 1) ? 0 : 1, actions);
+		mobilesync_actions_free(actions);
 		err = mobilesync_receive_remapping(client, &remapping);
 	}
 	*/
@@ -121,6 +123,8 @@ int main(int argc, char *argv[])
 	uint16_t port = 0;
 	lockdownd_client_t client = NULL;
 	idevice_t phone = NULL;
+	char **classes = NULL;
+	int i, count = 0;
 
 	if (argc > 1 && !strcasecmp(argv[1], "--debug"))
 		idevice_set_debug_level(1);
@@ -136,6 +140,14 @@ int main(int argc, char *argv[])
 	}
 
 	lockdownd_start_service(client, "com.apple.mobilesync", &port);
+	lockdownd_get_sync_data_classes(client, &classes, &count);
+
+	printf("Data classes enabled:\n");
+	for (i = 0; i < count; i++) {
+		printf("\t%s\n", classes[i]);
+	}
+
+	lockdownd_data_classes_free(classes);
 
 	if (port) {
 		mobilesync_client_t msync = NULL;

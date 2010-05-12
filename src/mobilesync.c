@@ -452,13 +452,13 @@ mobilesync_error_t mobilesync_acknowledge_changes_from_device(mobilesync_client_
 	return err;
 }
 
-static plist_t create_process_changes_message(const char *data_class, plist_t entity_mapping, uint8_t more_changes, plist_t client_options)
+static plist_t create_process_changes_message(const char *data_class, plist_t entity_mapping, uint8_t more_changes, plist_t actions)
 {
 	plist_t msg = plist_new_array();
 	plist_array_append_item(msg, plist_new_string("SDMessageProcessChanges"));
 	plist_array_append_item(msg, plist_copy(entity_mapping));
 	plist_array_append_item(msg, plist_new_bool(more_changes));
-	plist_array_append_item(msg, plist_copy(client_options));
+	plist_array_append_item(msg, plist_copy(actions));
 
 	return msg;
 }
@@ -526,7 +526,7 @@ mobilesync_error_t mobilesync_ready_to_send_changes_from_computer(mobilesync_cli
 	return err;
 }
 
-mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, plist_t changes, uint8_t is_last_record, plist_t client_options)
+mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, plist_t changes, uint8_t is_last_record, plist_t actions)
 {
 	if (!client || !client->data_class || !changes) {
 		return MOBILESYNC_E_INVALID_ARG;
@@ -543,7 +543,7 @@ mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, plist_t c
 	mobilesync_error_t err = MOBILESYNC_E_UNKNOWN_ERROR;
 	plist_t msg = NULL;
 
-	msg = create_process_changes_message(client->data_class, changes, (is_last_record > 0 ? 0 : 1), client_options);
+	msg = create_process_changes_message(client->data_class, changes, (is_last_record > 0 ? 0 : 1), actions);
 	err = mobilesync_send(client, msg);
 
 	if (msg) {
@@ -623,7 +623,7 @@ mobilesync_error_t mobilesync_receive_remapping(mobilesync_client_t client, plis
 	return err;
 }
 
-mobilesync_error_t mobilesync_cancel(mobilesync_client_t client, const char* reason)
+mobilesync_error_t mobilesync_session_cancel(mobilesync_client_t client, const char* reason)
 {
 	if (!client || !client->data_class || !reason) {
 		return MOBILESYNC_E_INVALID_ARG;
@@ -680,17 +680,17 @@ void mobilesync_anchors_free(mobilesync_anchors_t anchors)
 	anchors = NULL;
 }
 
-plist_t mobilesync_client_options_new()
+plist_t mobilesync_actions_new()
 {
 	return plist_new_dict();
 }
 
-void mobilesync_client_options_add(plist_t client_options, ...)
+void mobilesync_actions_add(plist_t actions, ...)
 {
-	if (!client_options)
+	if (!actions)
 		return;
 	va_list args;
-	va_start(args, client_options);
+	va_start(args, actions);
 	char *arg = va_arg(args, char*);
 	while (arg) {
 		char *key = strdup(arg);
@@ -705,10 +705,10 @@ void mobilesync_client_options_add(plist_t client_options, ...)
 				plist_array_append_item(array, plist_new_string(entity_names[i]));
 			}
 
-			plist_dict_insert_item(client_options, key, array);
+			plist_dict_insert_item(actions, key, array);
 		} else if (!strcmp(key, "SyncDeviceLinkAllRecordsOfPulledEntityTypeSentKey")) {
 			int link_records = va_arg(args, int);
-			plist_dict_insert_item(client_options, key, plist_new_bool(link_records));
+			plist_dict_insert_item(actions, key, plist_new_bool(link_records));
 		}
 		free(key);
 		key = NULL;
@@ -717,10 +717,10 @@ void mobilesync_client_options_add(plist_t client_options, ...)
 	va_end(args);
 }
 
-void mobilesync_client_options_free(plist_t client_options)
+void mobilesync_actions_free(plist_t actions)
 {
-	if (client_options) {
-		plist_free(client_options);
-		client_options = NULL;
+	if (actions) {
+		plist_free(actions);
+		actions = NULL;
 	}
 }
