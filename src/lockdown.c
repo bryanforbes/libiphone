@@ -22,6 +22,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <glib.h>
 #include <libtasn1.h>
 #include <gnutls/x509.h>
@@ -190,8 +191,10 @@ lockdownd_error_t lockdownd_client_free(lockdownd_client_t client)
 		return LOCKDOWN_E_INVALID_ARG;
 	lockdownd_error_t ret = LOCKDOWN_E_UNKNOWN_ERROR;
 
-	if (client->session_id)
+	if (client->session_id) {
 		lockdownd_stop_session(client, client->session_id);
+		free(client->session_id);
+	}
 
 	if (client->parent) {
 		lockdownd_goodbye(client);
@@ -1234,6 +1237,7 @@ lockdownd_error_t lockdownd_start_session(lockdownd_client_t client, const char 
 	/* if we have a running session, stop current one first */
 	if (client->session_id) {
 		lockdownd_stop_session(client, client->session_id);
+		free(client->session_id);
 	}
 
 	/* setup request plist */
@@ -1507,6 +1511,18 @@ lockdownd_error_t lockdownd_deactivate(lockdownd_client_t client)
 	return ret;
 }
 
+static void remove_spaces(char *source)
+{
+	char *dest = source;
+	while (*source != 0) {
+		if (!isspace(*source)) {
+			*dest++ = *source; /* copy */
+		}
+		source++;
+	}
+	*dest = 0;
+}
+
 lockdownd_error_t lockdownd_get_sync_data_classes(lockdownd_client_t client, char ***classes, int *count)
 {
 	if (!client)
@@ -1566,6 +1582,7 @@ lockdownd_error_t lockdownd_get_sync_data_classes(lockdownd_client_t client, cha
 
 		if (add_to_list) {
 			newlist = realloc(*classes, sizeof(char*) * (newcount+1));
+			remove_spaces(key);
 			asprintf(&newlist[newcount++], "com.apple.%s", key);
 			*classes = newlist;
 		}
