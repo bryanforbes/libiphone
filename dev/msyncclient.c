@@ -30,23 +30,6 @@
 #include <libimobiledevice/mobilesync.h>
 #include "../src/mobilesync.h"
 
-static char check_string(plist_t node, char* string)
-{
-	char ret = 1;
-	char* msg = NULL;
-	plist_type type = plist_get_node_type(node);
-	if (PLIST_STRING == type) {
-		plist_get_string_val(node, &msg);
-	}
-	if (PLIST_STRING != type || strcmp(msg, string)) {
-		printf("%s: ERROR: MobileSync client did not find %s !\n", __func__, string);
-		ret = 0;
-	}
-	free(msg);
-	msg = NULL;
-	return ret;
-}
-
 static mobilesync_error_t mobilesync_get_all_contacts(mobilesync_client_t client)
 {
 	if (!client)
@@ -56,14 +39,21 @@ static mobilesync_error_t mobilesync_get_all_contacts(mobilesync_client_t client
 	GTimeVal current_time = { 0, 0 };
 	mobilesync_sync_type_t sync_type;
 	uint64_t data_class_version;
+	char *xml_out = NULL;
+	plist_t records = NULL;
+	gchar *host_anchor = NULL;
+	uint8_t is_last_record = 0;
+	uint32_t xml_out_len = 0;
 
 	g_get_current_time(&current_time);
-	mobilesync_anchors anchors = {
-		NULL,
-		g_time_val_to_iso8601(&current_time)
-	};
+	host_anchor = g_time_val_to_iso8601(&current_time);
 
-	ret = mobilesync_session_start(client, "com.apple.Calendars", &anchors, &sync_type, &data_class_version);
+	mobilesync_anchors_t anchors = mobilesync_anchors_new(NULL, host_anchor);
+	g_free(host_anchor);
+
+	ret = mobilesync_session_start(client, "com.apple.Calendars", anchors, &sync_type, &data_class_version);
+
+	mobilesync_anchors_free(anchors);
 
 	if (ret != MOBILESYNC_E_SUCCESS) {
 		goto out;
@@ -73,12 +63,6 @@ static mobilesync_error_t mobilesync_get_all_contacts(mobilesync_client_t client
 	if (ret != MOBILESYNC_E_SUCCESS) {
 		goto out;
 	}
-
-	uint8_t is_last_record = 0;
-	plist_t records = NULL;
-
-	char *xml_out = NULL;
-	uint32_t xml_out_len = 0;
 
 	do {
 		ret = mobilesync_receive_changes(client, &records, &is_last_record);
@@ -107,10 +91,22 @@ static mobilesync_error_t mobilesync_get_all_contacts(mobilesync_client_t client
 		}
 	} while(!is_last_record);
 
+	/*
+	err = mobilesync_ready_to_send_changes_from_computer(client);
+	if (ret != MOBILESYNC_E_SUCCESS) {
+		goto out;
+	}
+
+	for (i = 0; i < number_of_changed; i++) {
+		err = mobilesync_send_changes(client, changes[i], i == (number_of_changed - 1) ? 0 : 1, client_options);
+		err = mobilesync_receive_remapping(client, &remapping);
+	}
+	*/
+
 	mobilesync_session_finish(client);
 
 	out:
-	if (xml_out) {
+	if (xml_out != NULL) {
 		free(xml_out);
 	}
 	if (records) {
@@ -145,7 +141,10 @@ int main(int argc, char *argv[])
 		mobilesync_client_t msync = NULL;
 		mobilesync_client_new(phone, port, &msync);
 		if (msync) {
-			mobilesync_get_all_contacts(msync);
+			mobilesync_error_t err = mobilesync_get_all_contacts(msync);
+			if (err != MOBILESYNC_E_SUCCESS) {
+				printf("Error: %d\n", err);
+			}
 			mobilesync_client_free(msync);
 		}
 	} else {

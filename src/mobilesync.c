@@ -22,6 +22,7 @@
 #include <plist/plist.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <glib.h>
 
 #include "mobilesync.h"
@@ -87,7 +88,7 @@ mobilesync_error_t mobilesync_client_new(idevice_t device, uint16_t port,
 
 	mobilesync_client_t client_loc = (mobilesync_client_t) malloc(sizeof(struct mobilesync_client_private));
 	client_loc->parent = dlclient;
-	client_loc->started_send_changes = 0;
+	client_loc->direction = MOBILESYNC_SYNC_DIR_DEVICE_TO_HOST;
 	client_loc->data_class = NULL;
 
 	/* perform handshake */
@@ -159,14 +160,17 @@ mobilesync_error_t mobilesync_send(mobilesync_client_t client, plist_t plist)
 mobilesync_error_t mobilesync_session_start(mobilesync_client_t client, const char *data_class, mobilesync_anchors_t anchors, mobilesync_sync_type_t *sync_type, uint64_t *data_class_version)
 {
 	if (!client || client->data_class || !data_class ||
-		!anchors || !anchors->host_anchor) {
+		!anchors || !anchors->computer_anchor) {
 		return MOBILESYNC_E_INVALID_ARG;
 	}
 
 	mobilesync_error_t err = MOBILESYNC_E_UNKNOWN_ERROR;
+	char *response_type = NULL;
+	char *sync_type_str = NULL;
+	plist_t msg = NULL;
+	plist_t response_type_node = NULL;
 
-	plist_t msg = plist_new_array();
-
+	msg = plist_new_array();
 	plist_array_append_item(msg, plist_new_string("SDMessageSyncDataClassWithDevice"));
 	plist_array_append_item(msg, plist_new_string(data_class));
 	if (anchors->device_anchor) {
@@ -174,7 +178,7 @@ mobilesync_error_t mobilesync_session_start(mobilesync_client_t client, const ch
 	} else {
 		plist_array_append_item(msg, plist_new_string("---"));
 	}
-	plist_array_append_item(msg, plist_new_string(anchors->host_anchor));
+	plist_array_append_item(msg, plist_new_string(anchors->computer_anchor));
 	plist_array_append_item(msg, plist_new_uint(106));
 	plist_array_append_item(msg, plist_new_string(EMPTY_PARAMETER_STRING));
 
@@ -193,30 +197,38 @@ mobilesync_error_t mobilesync_session_start(mobilesync_client_t client, const ch
 		goto out;
 	}
 
-	plist_t response_type_node = plist_array_get_item(msg, 0);
+	response_type_node = plist_array_get_item(msg, 0);
 	if (!response_type_node) {
 		err = MOBILESYNC_E_PLIST_ERROR;
 		goto out;
 	}
 
-	char *response_type = NULL;
 	plist_get_string_val(response_type_node, &response_type);
 	if (!response_type) {
 		err = MOBILESYNC_E_PLIST_ERROR;
 		goto out;
 	}
 
-	if (strcmp(response_type, "SDMessageRefuseToSyncDataClassWithComputer") == 0) {
+	if (!strcmp(response_type, "SDMessageRefuseToSyncDataClassWithComputer")) {
+		char *reason = NULL;
 		err = MOBILESYNC_E_SYNC_REFUSED;
+		plist_get_string_val(plist_array_get_item(msg, 2), &reason);
+		debug_info("Device refused sync: %s", reason);
+		free(reason);
+		reason = NULL;
 		goto out;
 	}
 
-	if (strcmp(response_type, "SDMessageCancelSession") == 0) {
+	if (!strcmp(response_type, "SDMessageCancelSession")) {
+		char *reason = NULL;
 		err = MOBILESYNC_E_CANCELLED;
+		plist_get_string_val(plist_array_get_item(msg, 2), &reason);
+		debug_info("Device cancelled: %s", reason);
+		free(reason);
+		reason = NULL;
 		goto out;
 	}
 
-	char *sync_type_str = NULL;
 	if (sync_type != NULL) {
 		plist_t sync_type_node = plist_array_get_item(msg, 4);
 		if (!sync_type_node) {
@@ -230,11 +242,11 @@ mobilesync_error_t mobilesync_session_start(mobilesync_client_t client, const ch
 			goto out;
 		}
 
-		if (strcmp(sync_type_str, "SDSyncTypeFast") == 0) {
+		if (!strcmp(sync_type_str, "SDSyncTypeFast")) {
 			*sync_type = MOBILESYNC_SYNC_TYPE_FAST;
-		} else if (strcmp(sync_type_str, "SDSyncTypeSlow") == 0) {
+		} else if (!strcmp(sync_type_str, "SDSyncTypeSlow")) {
 			*sync_type = MOBILESYNC_SYNC_TYPE_SLOW;
-		} else if (strcmp(sync_type_str, "SDSyncTypeReset") == 0) {
+		} else if (!strcmp(sync_type_str, "SDSyncTypeReset")) {
 			*sync_type = MOBILESYNC_SYNC_TYPE_RESET;
 		} else {
 			err = MOBILESYNC_E_PLIST_ERROR;
@@ -257,16 +269,19 @@ mobilesync_error_t mobilesync_session_start(mobilesync_client_t client, const ch
 	out:
 	if (sync_type_str) {
 		free(sync_type_str);
+		sync_type_str = NULL;
 	}
 	if (response_type) {
 		free(response_type);
+		response_type = NULL;
 	}
 	if (msg) {
 		plist_free(msg);
+		msg = NULL;
 	}
 
 	client->data_class = strdup(data_class);
-	client->started_send_changes = 0;
+	client->direction = MOBILESYNC_SYNC_DIR_DEVICE_TO_HOST;
 	return err;
 }
 
@@ -278,7 +293,11 @@ mobilesync_error_t mobilesync_session_finish(mobilesync_client_t client)
 
 	mobilesync_error_t err = MOBILESYNC_E_UNKNOWN_ERROR;
 
-	plist_t msg = plist_new_array();
+	plist_t msg = NULL;
+	plist_t response_type_node = NULL;
+	char *response_type = NULL;
+
+	msg = plist_new_array();
 	plist_array_append_item(msg, plist_new_string("SDMessageFinishSessionOnDevice"));
 	plist_array_append_item(msg, plist_new_string(client->data_class));
 
@@ -297,34 +316,35 @@ mobilesync_error_t mobilesync_session_finish(mobilesync_client_t client)
 		goto out;
 	}
 
-	plist_t response_type_node = plist_array_get_item(msg, 0);
+	response_type_node = plist_array_get_item(msg, 0);
 	if (!response_type_node) {
 		err = MOBILESYNC_E_PLIST_ERROR;
 		goto out;
 	}
 
-	char *response_type = NULL;
 	plist_get_string_val(response_type_node, &response_type);
 	if (!response_type) {
 		err = MOBILESYNC_E_PLIST_ERROR;
 		goto out;
 	}
 
-	if (strcmp(response_type, "SDMessageDeviceFinishedSession") == 0) {
+	if (!strcmp(response_type, "SDMessageDeviceFinishedSession")) {
 		err = MOBILESYNC_E_SUCCESS;
 	}
 
 	out:
 	if (response_type) {
 		free(response_type);
+		response_type = NULL;
 	}
 	if (msg) {
 		plist_free(msg);
+		msg = NULL;
 	}
 
 	free(client->data_class);
 	client->data_class = NULL;
-	client->started_send_changes = 0;
+	client->direction = MOBILESYNC_SYNC_DIR_DEVICE_TO_HOST;
 	return err;
 }
 
@@ -335,8 +355,9 @@ static mobilesync_error_t mobilesync_get_records(mobilesync_client_t client, con
 	}
 
 	mobilesync_error_t err = MOBILESYNC_E_UNKNOWN_ERROR;
+	plist_t msg = NULL;
 
-	plist_t msg = plist_new_array();
+	msg = plist_new_array();
 	plist_array_append_item(msg, plist_new_string(operation));
 	plist_array_append_item(msg, plist_new_string(client->data_class));
 	
@@ -344,6 +365,7 @@ static mobilesync_error_t mobilesync_get_records(mobilesync_client_t client, con
 
 	if (msg) {
 		plist_free(msg);
+		msg = NULL;
 	}
 	return err;
 }
@@ -365,39 +387,49 @@ mobilesync_error_t mobilesync_receive_changes(mobilesync_client_t client, plist_
 	}
 
 	plist_t msg = NULL;
+	plist_t response_type_node = NULL;
+	char *response_type = NULL;
+	uint8_t has_more_changes = 0;
 
 	mobilesync_error_t err = mobilesync_receive(client, &msg);
+	if (err != MOBILESYNC_E_SUCCESS) {
+		goto out;
+	}
 
-	plist_t response_type_node = plist_array_get_item(msg, 0);
+	response_type_node = plist_array_get_item(msg, 0);
 	if (!response_type_node) {
 		err = MOBILESYNC_E_PLIST_ERROR;
 		goto out;
 	}
 
-	char *response_type = NULL;
 	plist_get_string_val(response_type_node, &response_type);
 	if (!response_type) {
 		err = MOBILESYNC_E_PLIST_ERROR;
 		goto out;
 	}
 
-	if (strcmp(response_type, "SDMessageCancelSession") == 0) {
+	if (!strcmp(response_type, "SDMessageCancelSession")) {
+		char *reason = NULL;
 		err = MOBILESYNC_E_CANCELLED;
+		plist_get_string_val(plist_array_get_item(msg, 2), &reason);
+		debug_info("Device cancelled: %s", reason);
+		free(reason);
 		goto out;
 	}
 
 	*entities = plist_copy(plist_array_get_item(msg, 2));
 
-	uint8_t has_more_changes = 0;
 	plist_get_bool_val(plist_array_get_item(msg, 3), &has_more_changes);
 	*is_last_record = (has_more_changes > 0 ? 0 : 1);
 
 	out:
 	if (response_type) {
 		free(response_type);
+		response_type = NULL;
 	}
 	if (msg) {
 		plist_free(msg);
+		msg = NULL;
 	}
 	return err;
 }
@@ -408,41 +440,93 @@ mobilesync_error_t mobilesync_acknowledge_changes_from_device(mobilesync_client_
 		return MOBILESYNC_E_INVALID_ARG;
 	}
 
-	plist_t msg = plist_new_array();
+	plist_t msg = NULL;
+	mobilesync_error_t err = MOBILESYNC_E_UNKNOWN_ERROR;
 
+	msg = plist_new_array();
 	plist_array_append_item(msg, plist_new_string("SDMessageAcknowledgeChangesFromDevice"));
 	plist_array_append_item(msg, plist_new_string(client->data_class));
 
-	mobilesync_error_t err = mobilesync_send(client, msg);
+	err = mobilesync_send(client, msg);
 	plist_free(msg);
 	return err;
 }
 
-static plist_t create_process_changes_message(const char *data_class, plist_t entity_mapping, uint8_t more_changes, const char **entity_names, uint32_t entity_names_length, uint8_t report_and_remap)
+static plist_t create_process_changes_message(const char *data_class, plist_t entity_mapping, uint8_t more_changes, plist_t client_options)
 {
 	plist_t msg = plist_new_array();
-
 	plist_array_append_item(msg, plist_new_string("SDMessageProcessChanges"));
 	plist_array_append_item(msg, plist_copy(entity_mapping));
 	plist_array_append_item(msg, plist_new_bool(more_changes));
-
-	plist_t entity_array = plist_new_array();
-
-	uint32_t i = 0;
-	for (i = 0; i < entity_names_length; i++) {
-		plist_array_append_item(entity_array, plist_new_string(entity_names[i]));
-	}
-
-	plist_t sync_actions = plist_new_dict();
-	plist_dict_insert_item(sync_actions, "SyncDeviceLinkEntityNamesKey", entity_array);
-	plist_dict_insert_item(sync_actions, "SyncDeviceLinkAllRecordsOfPulledEntityTypeSentKey", plist_new_bool(report_and_remap));
-
-	plist_array_append_item(msg, sync_actions);
+	plist_array_append_item(msg, plist_copy(client_options));
 
 	return msg;
 }
 
-mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, plist_t changes, uint8_t is_last_record, const char **entity_names, uint32_t entity_names_length, uint8_t report_and_remap)
+mobilesync_error_t mobilesync_ready_to_send_changes_from_computer(mobilesync_client_t client)
+{
+	if (!client || !client->data_class) {
+		return MOBILESYNC_E_INVALID_ARG;
+	}
+
+	if (client->direction != MOBILESYNC_SYNC_DIR_DEVICE_TO_HOST) {
+		return MOBILESYNC_E_WRONG_DIRECTION;
+	}
+
+	plist_t msg = NULL;
+	plist_t response_type_node = NULL;
+	char *response_type = NULL;
+	mobilesync_error_t err = MOBILESYNC_E_UNKNOWN_ERROR;
+
+	err = mobilesync_receive(client, &msg);
+	if (err != MOBILESYNC_E_SUCCESS) {
+		goto out;
+	}
+
+	response_type_node = plist_array_get_item(msg, 0);
+	if (!response_type_node) {
+		err = MOBILESYNC_E_PLIST_ERROR;
+		goto out;
+	}
+
+	plist_get_string_val(response_type_node, &response_type);
+	if (!response_type) {
+		err = MOBILESYNC_E_PLIST_ERROR;
+		goto out;
+	}
+
+	if (!strcmp(response_type, "SDMessageCancelSession")) {
+		char *reason = NULL;
+		err = MOBILESYNC_E_CANCELLED;
+		plist_get_string_val(plist_array_get_item(msg, 2), &reason);
+		debug_info("Device cancelled: %s", reason);
+		free(reason);
+		goto out;
+	}
+
+	if (strcmp(response_type, "SDMessageDeviceReadyToReceiveChanges") != 0) {
+		err = MOBILESYNC_E_NOT_READY;
+		goto out;
+	}
+
+	err = mobilesync_error(device_link_service_send_ping(client->parent, "Preparing to get changes for device"));
+	if (err != MOBILESYNC_E_SUCCESS) {
+		goto out;
+	}
+
+	client->direction = MOBILESYNC_SYNC_DIR_HOST_TO_DEVICE;
+	err = MOBILESYNC_E_SUCCESS;
+
+	out:
+	if (msg) {
+		plist_free(msg);
+		msg = NULL;
+	}
+
+	return err;
+}
+
+mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, plist_t changes, uint8_t is_last_record, plist_t client_options)
 {
 	if (!client || !client->data_class || !changes) {
 		return MOBILESYNC_E_INVALID_ARG;
@@ -452,25 +536,19 @@ mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, plist_t c
 		return MOBILESYNC_E_INVALID_ARG;
 	}
 
+	if (client->direction != MOBILESYNC_SYNC_DIR_HOST_TO_DEVICE) {
+		return MOBILESYNC_E_WRONG_DIRECTION;
+	}
+
 	mobilesync_error_t err = MOBILESYNC_E_UNKNOWN_ERROR;
 	plist_t msg = NULL;
 
-	if (!client->started_send_changes) {
-		err = mobilesync_error(device_link_service_send_ping(client->parent, "Preparing to get changes for device"));
-		if (err != MOBILESYNC_E_SUCCESS) {
-			goto out;
-		}
-		client->started_send_changes = 1;
-		err = MOBILESYNC_E_UNKNOWN_ERROR;
-	}
-
-	create_process_changes_message(client->data_class, changes, (is_last_record > 0 ? 0 : 1), entity_names, entity_names_length, report_and_remap);
-
+	msg = create_process_changes_message(client->data_class, changes, (is_last_record > 0 ? 0 : 1), client_options);
 	err = mobilesync_send(client, msg);
 
-	out:
 	if (msg) {
 		plist_free(msg);
+		msg = NULL;
 	}
 
 	return err;
@@ -478,32 +556,41 @@ mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, plist_t c
 
 mobilesync_error_t mobilesync_receive_remapping(mobilesync_client_t client, plist_t *remapping)
 {
-	if (!client || !client->data_class || !client->started_send_changes) {
+	if (!client || !client->data_class) {
 		return MOBILESYNC_E_INVALID_ARG;
 	}
 
+	if (client->direction == MOBILESYNC_SYNC_DIR_DEVICE_TO_HOST) {
+		return MOBILESYNC_E_WRONG_DIRECTION;
+	}
+
 	plist_t msg = NULL;
+	plist_t response_type_node = NULL;
+	char *response_type = NULL;
 
 	mobilesync_error_t err = mobilesync_receive(client, &msg);
 	if (err != MOBILESYNC_E_SUCCESS) {
 		goto out;
 	}
 
-	plist_t response_type_node = plist_array_get_item(msg, 0);
+	response_type_node = plist_array_get_item(msg, 0);
 	if (!response_type_node) {
 		err = MOBILESYNC_E_PLIST_ERROR;
 		goto out;
 	}
 
-	char *response_type = NULL;
 	plist_get_string_val(response_type_node, &response_type);
 	if (!response_type) {
 		err = MOBILESYNC_E_PLIST_ERROR;
 		goto out;
 	}
 
-	if (strcmp(response_type, "SDMessageCancelSession") == 0) {
+	if (!strcmp(response_type, "SDMessageCancelSession")) {
+		char *reason = NULL;
 		err = MOBILESYNC_E_CANCELLED;
+		plist_get_string_val(plist_array_get_item(msg, 2), &reason);
+		debug_info("Device cancelled: %s", reason);
+		free(reason);
 		goto out;
 	}
 
@@ -526,9 +613,11 @@ mobilesync_error_t mobilesync_receive_remapping(mobilesync_client_t client, plis
 	out:
 	if (response_type) {
 		free(response_type);
+		response_type = NULL;
 	}
 	if (msg) {
 		plist_free(msg);
+		msg = NULL;
 	}
 
 	return err;
@@ -540,19 +629,98 @@ mobilesync_error_t mobilesync_cancel(mobilesync_client_t client, const char* rea
 		return MOBILESYNC_E_INVALID_ARG;
 	}
 
-	plist_t msg = plist_new_array();
+	mobilesync_error_t err = MOBILESYNC_E_UNKNOWN_ERROR;
+	plist_t msg = NULL;
+
+	msg = plist_new_array();
 	plist_array_append_item(msg, plist_new_string("SDMessageCancelSession"));
 	plist_array_append_item(msg, plist_new_string(client->data_class));
 	plist_array_append_item(msg, plist_new_string(reason));
 
-	mobilesync_error_t err = mobilesync_send(client, msg);
+	err = mobilesync_send(client, msg);
 
 	plist_free(msg);
 	msg = NULL;
 
 	free(client->data_class);
 	client->data_class = NULL;
-	client->started_send_changes = 0;
+	client->direction = MOBILESYNC_SYNC_DIR_DEVICE_TO_HOST;
 
 	return err;
+}
+
+mobilesync_anchors_t mobilesync_anchors_new(const char *device_anchor, const char *computer_anchor)
+{
+	mobilesync_anchors_t anchors = (mobilesync_anchors_t) malloc(sizeof(mobilesync_anchors)); 
+	if (device_anchor != NULL) {
+		anchors->device_anchor = strdup(device_anchor);
+	} else {
+		anchors->device_anchor = NULL;
+	}
+	if (computer_anchor != NULL) {
+		anchors->computer_anchor = strdup(computer_anchor);
+	} else {
+		anchors->computer_anchor = NULL;
+	}
+
+	return anchors;
+}
+
+void mobilesync_anchors_free(mobilesync_anchors_t anchors)
+{
+	if (anchors->device_anchor != NULL) {
+		free(anchors->device_anchor);
+		anchors->device_anchor = NULL;
+	}
+	if (anchors->computer_anchor != NULL) {
+		free(anchors->computer_anchor);
+		anchors->computer_anchor = NULL;
+	}
+	free(anchors);
+	anchors = NULL;
+}
+
+plist_t mobilesync_client_options_new()
+{
+	return plist_new_dict();
+}
+
+void mobilesync_client_options_add(plist_t client_options, ...)
+{
+	if (!client_options)
+		return;
+	va_list args;
+	va_start(args, client_options);
+	char *arg = va_arg(args, char*);
+	while (arg) {
+		char *key = strdup(arg);
+		if (!strcmp(key, "SyncDeviceLinkEntityNamesKey")) {
+			char **entity_names = va_arg(args, char**);
+			int entity_names_length = va_arg(args, int);
+			int i = 0;
+
+			plist_t array = plist_new_array();
+
+			for (i = 0; i < entity_names_length; i++) {
+				plist_array_append_item(array, plist_new_string(entity_names[i]));
+			}
+
+			plist_dict_insert_item(client_options, key, array);
+		} else if (!strcmp(key, "SyncDeviceLinkAllRecordsOfPulledEntityTypeSentKey")) {
+			int link_records = va_arg(args, int);
+			plist_dict_insert_item(client_options, key, plist_new_bool(link_records));
+		}
+		free(key);
+		key = NULL;
+		arg = va_arg(args, char*);
+	}
+	va_end(args);
+}
+
+void mobilesync_client_options_free(plist_t client_options)
+{
+	if (client_options) {
+		plist_free(client_options);
+		client_options = NULL;
+	}
 }

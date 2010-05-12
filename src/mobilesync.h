@@ -24,9 +24,14 @@
 #include "libimobiledevice/mobilesync.h"
 #include "device_link_service.h"
 
+typedef enum {
+	MOBILESYNC_SYNC_DIR_DEVICE_TO_HOST,
+	MOBILESYNC_SYNC_DIR_HOST_TO_DEVICE
+} mobilesync_sync_direction_t;
+
 struct mobilesync_client_private {
 	device_link_service_client_t parent;
-	uint8_t started_send_changes;
+	mobilesync_sync_direction_t direction;
 	char *data_class;
 };
 
