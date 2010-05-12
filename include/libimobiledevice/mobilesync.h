@@ -58,26 +58,29 @@ typedef mobilesync_client_private *mobilesync_client_t; /**< The client handle *
 typedef struct {
 	char *device_anchor;
 	char *host_anchor;
-	int version;
-} mobilesync_anchor_exchange;
-typedef mobilesync_anchor_exchange *mobilesync_anchor_exchange_t;
-
-typedef char* (*mobilesync_process_device_changes_cb_t) (const char* data_class, plist_t entity_mapping, uint8_t more_changes, void *user_data);
-typedef char* (*mobilesync_process_device_remapping_cb_t) (const char* data_class, plist_t entity_remapping, void *user_data);
+} mobilesync_anchors;
+typedef mobilesync_anchors *mobilesync_anchors_t;
 
 mobilesync_error_t mobilesync_client_new(idevice_t device, uint16_t port, mobilesync_client_t * client);
 mobilesync_error_t mobilesync_client_free(mobilesync_client_t client);
 mobilesync_error_t mobilesync_receive(mobilesync_client_t client, plist_t *plist);
 mobilesync_error_t mobilesync_send(mobilesync_client_t client, plist_t plist);
 
-mobilesync_error_t mobilesync_start_session(mobilesync_client_t client, const char* data_class, mobilesync_anchor_exchange_t anchor_exchange, mobilesync_sync_type_t* sync_type);
-mobilesync_error_t mobilesync_finish_session(mobilesync_client_t client, const char* data_class);
+mobilesync_error_t mobilesync_session_start(mobilesync_client_t client, const char *data_class, mobilesync_anchors_t anchors, mobilesync_sync_type_t *sync_type, uint64_t *data_class_version);
+mobilesync_error_t mobilesync_session_finish(mobilesync_client_t client);
 
-mobilesync_error_t mobilesync_get_all_records(mobilesync_client_t client, const char* data_class, mobilesync_process_device_changes_cb_t process_changes_cb, void *user_data);
-mobilesync_error_t mobilesync_get_changed_records(mobilesync_client_t client, const char* data_class, mobilesync_process_device_changes_cb_t process_changes_cb, void *user_data);
-mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, const char* data_class, plist_t *changes, mobilesync_process_device_remapping_cb_t process_remapping_cb, void *user_data);
+/* receive */
+mobilesync_error_t mobilesync_get_all_records_from_device(mobilesync_client_t client);
+mobilesync_error_t mobilesync_get_changes_from_device(mobilesync_client_t client);
+mobilesync_error_t mobilesync_receive_changes(mobilesync_client_t client, plist_t *entities, uint8_t *more_changes);
+mobilesync_error_t mobilesync_acknowledge_changes_from_device(mobilesync_client_t client);
 
-mobilesync_error_t mobilesync_cancel(mobilesync_client_t client, const char* data_class, const char* reason);
+/* send */
+mobilesync_error_t mobilesync_send_changes(mobilesync_client_t client, plist_t changes, uint8_t is_last_record, const char **entity_names, uint32_t entity_names_length, uint8_t report_and_remap);
+mobilesync_error_t mobilesync_receive_remapping(mobilesync_client_t client, plist_t *remapping);
+
+/* cancel */
+mobilesync_error_t mobilesync_cancel(mobilesync_client_t client, const char* reason);
 
 #ifdef __cplusplus
 }

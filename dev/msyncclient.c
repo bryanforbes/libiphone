@@ -20,12 +20,15 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <glib.h>
 
 #include <libimobiledevice/libimobiledevice.h>
 #include <libimobiledevice/lockdown.h>
 #include <libimobiledevice/mobilesync.h>
+#include "../src/mobilesync.h"
 
 static char check_string(plist_t node, char* string)
 {
@@ -50,91 +53,69 @@ static mobilesync_error_t mobilesync_get_all_contacts(mobilesync_client_t client
 		return MOBILESYNC_E_INVALID_ARG;
 
 	mobilesync_error_t ret = MOBILESYNC_E_UNKNOWN_ERROR;
-	plist_t array = NULL;
+	GTimeVal current_time = { 0, 0 };
+	mobilesync_sync_type_t sync_type;
+	uint64_t data_class_version;
 
-	array = plist_new_array();
-	plist_array_append_item(array, plist_new_string("SDMessageSyncDataClassWithDevice"));
-	plist_array_append_item(array, plist_new_string("com.apple.Contacts"));
-	plist_array_append_item(array, plist_new_string("---"));
-	plist_array_append_item(array, plist_new_string("2009-01-09 18:03:58 +0100"));
-	plist_array_append_item(array, plist_new_uint(106));
-	plist_array_append_item(array, plist_new_string("___EmptyParameterString___"));
+	g_get_current_time(&current_time);
+	mobilesync_anchors anchors = {
+		NULL,
+		g_time_val_to_iso8601(&current_time)
+	};
 
-	ret = mobilesync_send(client, array);
-	plist_free(array);
-	array = NULL;
+	ret = mobilesync_session_start(client, "com.apple.Calendars", &anchors, &sync_type, &data_class_version);
 
-	ret = mobilesync_receive(client, &array);
-
-	plist_free(array);
-	array = NULL;
-
-	array = plist_new_array();
-	plist_array_append_item(array, plist_new_string("SDMessageGetAllRecordsFromDevice"));
-	plist_array_append_item(array, plist_new_string("com.apple.Contacts"));
-
-	ret = mobilesync_send(client, array);
-	plist_free(array);
-	array = NULL;
-
-	ret = mobilesync_receive(client, &array);
-
-	plist_t contact_node;
-	plist_t switch_node;
-
-	contact_node = plist_array_get_item(array, 0);
-	switch_node = plist_array_get_item(array, 0);
-
-	while (NULL == switch_node
-	    && check_string(contact_node, "com.apple.Contacts")
-	    && check_string(switch_node, "SDMessageDeviceReadyToReceiveChanges")) {
-
-		plist_free(array);
-		array = NULL;
-
-		array = plist_new_array();
-		plist_array_append_item(array, plist_new_string("SDMessageAcknowledgeChangesFromDevice"));
-		plist_array_append_item(array, plist_new_string("com.apple.Contacts"));
-
-		ret = mobilesync_send(client, array);
-		plist_free(array);
-		array = NULL;
-
-		ret = mobilesync_receive(client, &array);
-
-		contact_node = plist_array_get_item(array, 0);
-		switch_node = plist_array_get_item(array, 0);
+	if (ret != MOBILESYNC_E_SUCCESS) {
+		goto out;
 	}
 
-	array = plist_new_array();
-	plist_array_append_item(array, plist_new_string("DLMessagePing"));
-	plist_array_append_item(array, plist_new_string("Preparing to get changes for device"));
+	ret = mobilesync_get_all_records_from_device(client);
+	if (ret != MOBILESYNC_E_SUCCESS) {
+		goto out;
+	}
 
-	ret = mobilesync_send(client, array);
-	plist_free(array);
-	array = NULL;
+	uint8_t is_last_record = 0;
+	plist_t records = NULL;
 
-	array = plist_new_array();
-	plist_array_append_item(array, plist_new_string("SDMessageProcessChanges"));
-	plist_array_append_item(array, plist_new_string("com.apple.Contacts"));
-	plist_array_append_item(array, plist_new_dict());
-	plist_array_append_item(array, plist_new_bool(0));
+	char *xml_out = NULL;
+	uint32_t xml_out_len = 0;
 
-	plist_t dict = plist_new_dict();
-	plist_array_append_item(array, dict);
-	plist_t array2 = plist_new_array();
-	plist_dict_insert_item(dict, "SyncDeviceLinkEntityNamesKey", array2);
-	plist_array_append_item(array2, plist_new_string("com.apple.contacts.Contact"));
-	plist_array_append_item(array2, plist_new_string("com.apple.contacts.Group"));
-	plist_dict_insert_item(dict, "SyncDeviceLinkAllRecordsOfPulledEntityTypeSentKey", plist_new_bool(0));
+	do {
+		ret = mobilesync_receive_changes(client, &records, &is_last_record);
+		if (ret != MOBILESYNC_E_SUCCESS) {
+			goto out;
+		}
 
-	ret = mobilesync_send(client, array);
-	plist_free(array);
-	array = NULL;
+		if (records) {
+			plist_to_xml(records, &xml_out, &xml_out_len);
+			if (xml_out_len > 0) {
+				printf("%s\n", xml_out);
+				free(xml_out);
+			}
+			xml_out = NULL;
+			xml_out_len = 0;
+		}
 
-	ret = mobilesync_receive(client, &array);
-	plist_free(array);
-	array = NULL;
+		plist_free(records);
+		records = NULL;
+
+		printf("%s\n", client->data_class);
+
+		ret = mobilesync_acknowledge_changes_from_device(client);
+		if (ret != MOBILESYNC_E_SUCCESS) {
+			goto out;
+		}
+	} while(!is_last_record);
+
+	mobilesync_session_finish(client);
+
+	out:
+	if (xml_out) {
+		free(xml_out);
+	}
+	if (records) {
+		plist_free(records);
+	}
 
 	return ret;
 }

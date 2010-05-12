@@ -26,6 +26,8 @@
 
 struct mobilesync_client_private {
 	device_link_service_client_t parent;
+	uint8_t started_send_changes;
+	char *data_class;
 };
 
 #endif
